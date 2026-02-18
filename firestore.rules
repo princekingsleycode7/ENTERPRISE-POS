@@ -1,0 +1,81 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    // Fetch user role from employees collection
+    function getUserData() {
+      return get(/databases/$(database)/documents/employees/$(request.auth.uid)).data;
+    }
+    
+    function hasRole(role) {
+      return isAuthenticated() && getUserData().role == role;
+    }
+    
+    function isManagerOrAdmin() {
+      return hasRole('manager') || hasRole('admin');
+    }
+    
+    function isAdmin() {
+      return hasRole('admin');
+    }
+
+    // Recent auth check (e.g. within 1 hour) for sensitive operations
+    function isRecentAuth() {
+       return request.time - request.auth.token.auth_time < duration.value(1, 'h');
+    }
+
+    // Employees Collection
+    match /employees/{employeeId} {
+      allow read: if isAuthenticated(); // All staff can read employee list
+      allow write: if isAdmin() && isRecentAuth(); // Only admin can manage employees
+    }
+
+    // Products Collection
+    match /products/{productId} {
+      allow read: if isAuthenticated();
+      // Price/Cost changes are sensitive
+      allow create, update: if isManagerOrAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // Transactions Collection
+    match /transactions/{transactionId} {
+      allow read: if isAuthenticated();
+      // Cashiers can create transactions
+      allow create: if isAuthenticated();
+      // Only managers/admins can update (void/refund) and must be recently authenticated
+      allow update: if isManagerOrAdmin() && isRecentAuth(); 
+      allow delete: if false; // Transactions should never be deleted, only voided via update
+    }
+
+    // Daily Cash Register
+    match /daily_cash_register/{registerId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update: if isAuthenticated(); // Cashiers need to update closing balance
+    }
+
+    // Audit Logs
+    match /audit_logs/{logId} {
+      allow read: if isManagerOrAdmin();
+      allow create: if isAuthenticated(); // System/App logs here
+      allow update, delete: if false; // Audit logs are immutable
+    }
+
+    // Settings
+    match /settings/{settingId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin() && isRecentAuth();
+    }
+    
+    // Default deny for everything else
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

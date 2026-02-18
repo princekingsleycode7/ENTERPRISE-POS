@@ -1,0 +1,5 @@
+{
+  "name": "Modern POS System",
+  "description": "A robust, offline-capable Point of Sale system built with React, Tailwind, and Firebase.",
+  "requestFramePermissions": []
+}
