@@ -44,10 +44,16 @@ export const transactionService = {
     let results = await collection.toArray();
 
     if (filters.startDate && filters.endDate) {
-      results = results.filter(t => {
-        const d = new Date(t.created_at);
-        return d >= filters.startDate! && d <= filters.endDate!;
-      });
+      // Validate dates
+      const start = new Date(filters.startDate);
+      const end = new Date(filters.endDate);
+      
+      if (!isNaN(start.getTime()) && !isNaN(end.getTime())) {
+        results = results.filter(t => {
+          const d = new Date(t.created_at);
+          return d >= start && d <= end;
+        });
+      }
     }
 
     if (filters.status && filters.status !== 'all') {
@@ -117,8 +123,10 @@ export const transactionService = {
   // --- Daily Register Logic ---
 
   async getCurrentRegister(employeeId: string): Promise<DailyCashRegister | undefined> {
+    // Improved query using explicit index
     return await offlineDB.daily_registers
-      .where({ employee_id: employeeId, status: 'open' })
+      .where('employee_id').equals(employeeId)
+      .filter(r => r.status === 'open')
       .first();
   },
 
@@ -139,8 +147,9 @@ export const transactionService = {
   },
 
   async getRegisterTotals(register: DailyCashRegister) {
-    if (!register.start_time) {
-       console.warn("Register missing start_time, cannot calculate totals accurately.");
+    // Validate start_time is a valid string for IDB range query
+    if (!register.start_time || typeof register.start_time !== 'string') {
+       console.warn("Register missing valid start_time, cannot calculate totals accurately.");
        return { cashSales: 0, transactionsCount: 0, expectedCash: register.opening_amount };
     }
 

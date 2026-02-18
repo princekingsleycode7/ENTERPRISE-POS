@@ -54,9 +54,18 @@ export const reportService = {
       end.setHours(23, 59, 59, 999);
       start.setHours(0, 0, 0, 0);
 
+      const startStr = start.toISOString();
+      const endStr = end.toISOString();
+
+      // Ensure range is valid (start <= end)
+      if (startStr > endStr) {
+        console.warn("Start date is after end date");
+        return [];
+      }
+
       return await offlineDB.transactions
         .where('created_at')
-        .between(start.toISOString(), end.toISOString(), true, true)
+        .between(startStr, endStr, true, true)
         .toArray();
     } catch (e) {
       console.error("Error fetching transactions for report:", e);
