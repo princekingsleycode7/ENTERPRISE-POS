@@ -3,6 +3,7 @@ import { Settings, Employee, Role } from '../../types';
 import { updateDocument, addDocument } from '../firebase/firestore';
 import { logAuditAction } from '../firebase/audit';
 import { pinAuth } from '../auth/pinAuth';
+import { ENV } from '../../config/env';
 
 const DEFAULT_SETTINGS: Settings = {
   id: 'global',
@@ -20,6 +21,9 @@ const DEFAULT_SETTINGS: Settings = {
   low_stock_threshold: 10,
   auto_sync_interval: 5,
   session_timeout: 30
+  ,
+  // default moniepoint terminal serial from environment (can be empty)
+  moniepoint_terminal_serial: ENV.MONIEPOINT.DEFAULT_TERMINAL_SERIAL || ''
 };
 
 export const settingsService = {

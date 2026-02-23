@@ -29,6 +29,8 @@ export const StoreSettings: React.FC<StoreSettingsProps> = ({ settings, onUpdate
       tax_rate: settings.tax_rate * 100, // Display as percentage
       tax_enabled: settings.tax_enabled,
       tax_label: settings.tax_label
+      ,
+      moniepoint_terminal_serial: (settings as any).moniepoint_terminal_serial || ''
     });
   }, [settings]);
 
@@ -112,6 +114,17 @@ export const StoreSettings: React.FC<StoreSettingsProps> = ({ settings, onUpdate
               <option value="EUR">Euro (€)</option>
               <option value="GBP">British Pound (£)</option>
             </select>
+          </div>
+          <div className="md:col-span-2">
+            <label className="block text-sm font-medium text-gray-700 mb-1">Moniepoint Terminal Serial (optional)</label>
+            <input
+              type="text"
+              className="w-full border border-gray-300 rounded-lg p-2 focus:ring-2 focus:ring-blue-500 outline-none font-mono"
+              placeholder="e.g. P260XXXXXXX"
+              value={(formData as any).moniepoint_terminal_serial || ''}
+              onChange={e => setFormData({ ...formData, moniepoint_terminal_serial: e.target.value })}
+            />
+            <p className="text-xs text-gray-400 mt-1">Optional default serial used by Payment modal; can be overridden per-store settings.</p>
           </div>
         </div>
       </div>

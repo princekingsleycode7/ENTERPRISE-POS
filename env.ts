@@ -1,3 +1,4 @@
+// config/env.ts
 // In a real Vite app, these would be accessed via import.meta.env
 // For this environment, we are mocking the structure to show usage.
 

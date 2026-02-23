@@ -1,0 +1,25 @@
+// firestore.rules  (ADDITIONS for Moniepoint)
+// Add these rule blocks inside the existing rules_version = '2' service block,
+// alongside your existing collection rules.
+
+// ─── Moniepoint Webhook Results ───────────────────────────────────────────────
+// Written ONLY by Cloud Functions (admin SDK bypasses rules).
+// Read by authenticated POS staff (real-time listener in PaymentModal).
+match /moniepoint_webhook_results/{merchantReference} {
+  // Authenticated staff can read — for the real-time onSnapshot listener in PaymentModal
+  allow read: if isAuthenticated();
+  // NEVER allow client writes — only Cloud Functions write here via Admin SDK
+  allow write: if false;
+}
+
+// ─── Moniepoint Processed Webhooks (Idempotency Guard) ────────────────────────
+// Written ONLY by Cloud Functions. Never read by clients.
+match /moniepoint_processed_webhooks/{webhookId} {
+  allow read, write: if false;
+}
+
+// ─── System Cache (OAuth Token) ───────────────────────────────────────────────
+// Cloud Functions read/write token cache. Clients have no access.
+match /system_cache/{cacheKey} {
+  allow read, write: if false;
+}

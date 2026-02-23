@@ -41,7 +41,7 @@ export const Cart: React.FC<CartProps> = ({ onCheckoutSuccess }) => {
   const tax = subtotal * taxRate;
   const total = subtotal + tax;
 
-  const handlePaymentComplete = async (method: 'cash' | 'card' | 'bank_transfer', details: any) => {
+  const handlePaymentComplete = async (method: 'cash' | 'card' | 'bank_transfer' | 'moniepoint', details: any) => {
     if (!user) return;
 
     try {
@@ -62,9 +62,11 @@ export const Cart: React.FC<CartProps> = ({ onCheckoutSuccess }) => {
         total: total,
         payment_method: method,
         payment_status: 'paid',
-        payment_reference: details.reference,
-        amount_tendered: details.amountTendered,
-        change_amount: details.change,
+        // Prefer gateway transaction reference when available (moniepoint provides transactionReference)
+        payment_reference: details.transactionReference ?? details.reference,
+        // Cash-only fields
+        amount_tendered: method === 'cash' ? details.amountTendered : undefined,
+        change_amount: method === 'cash' ? details.change : undefined,
         created_at: new Date().toISOString(),
         synced: false
       };

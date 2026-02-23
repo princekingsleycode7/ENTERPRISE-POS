@@ -26,4 +26,11 @@
     "allowImportingTsExtensions": true,
     "noEmit": true
   }
+  ,
+  "exclude": [
+    "functions",
+    "moniepoint-int",
+    "node_modules",
+    "services/moniepoint.ts"
+  ]
 }

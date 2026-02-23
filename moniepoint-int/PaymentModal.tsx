@@ -298,7 +298,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
                   ₦{parseFloat(amountTendered || '0').toLocaleString('en-NG', { minimumFractionDigits: 2 })}
                 </span>
               </div>
-              <NumPad onNumberClick={handleNumPad} onClear={handleClear} />
+              <NumPad onNumber={handleNumPad} onClear={handleClear} />
               {isCashSufficient && (
                 <div className="bg-green-50 border border-green-200 rounded-xl p-3 mt-3 flex justify-between">
                   <span className="text-green-700 font-medium">Change:</span>

@@ -47,7 +47,7 @@ export interface Transaction {
   subtotal: number;
   tax: number;
   total: number;
-  payment_method: 'cash' | 'card' | 'bank_transfer';
+  payment_method: 'cash' | 'card' | 'bank_transfer' | 'moniepoint';
   payment_status: 'paid' | 'pending' | 'void' | 'failed';
   payment_reference?: string; // Korapay reference
   amount_tendered?: number; // For cash
@@ -113,6 +113,8 @@ export interface Settings {
   low_stock_threshold: number;
   auto_sync_interval: number; // minutes
   session_timeout: number; // minutes
+  // Moniepoint Terminal Serial (optional)
+  moniepoint_terminal_serial?: string;
 }
 
 export interface CartItem extends Product {
