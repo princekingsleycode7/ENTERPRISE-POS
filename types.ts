@@ -6,7 +6,7 @@ export interface Employee {
   pin_hash: string;
   role: Role;
   access_level?: number;
-  created_at?: any; // Firestore Timestamp
+  created_at?: string; // Firestore Timestamp
   active: boolean;
   // Security fields
   failed_attempts?: number;
@@ -25,7 +25,7 @@ export interface Product {
   stock_quantity: number;
   reorder_level: number;
   imageUrl?: string;
-  created_at?: any;
+  created_at?: string;
   updated_at?: any;
 }
 

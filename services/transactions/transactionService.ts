@@ -155,7 +155,8 @@ export const transactionService = {
 
     // Calculate total cash sales since register start time
     const transactions = await offlineDB.transactions
-      .where('created_at').aboveOrEqual(register.start_time)
+      //.where('created_at').aboveOrEqual(register.start_time)
+      .where('created_at').aboveOrEqual(toISOString(register.start_time))
       .toArray();
     
     // Filter for this employee and Cash payments that are NOT void

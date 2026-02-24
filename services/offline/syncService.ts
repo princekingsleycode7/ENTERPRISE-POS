@@ -9,6 +9,20 @@ import { useSyncStore } from '../../stores/useSyncStore';
 
 const SYNC_INTERVAL = 5 * 60 * 1000; // 5 minutes
 
+
+// Helper function to add at the top of syncService.ts:
+function toISOString(value: any): string {
+  if (!value) return new Date().toISOString();
+  if (typeof value === 'string') return value;
+  if (value instanceof Date) return value.toISOString();
+  // Handle Firestore Timestamp
+  if (typeof value.toDate === 'function') return value.toDate().toISOString();
+  if (typeof value.seconds === 'number') {
+    return new Date(value.seconds * 1000).toISOString();
+  }
+  return new Date().toISOString();
+}
+
 // Check for mock environment to prevent connection errors
 const IS_MOCK_ENV = ENV.FIREBASE.PROJECT_ID === 'mock-project';
 
@@ -36,7 +50,7 @@ export const syncService = {
         await this.seedDefaultProducts();
       }
       
-      await offlineDB.cached_data.put({ id: 'last_product_sync', timestamp: Date.now() }, 'last_product_sync');
+      await offlineDB.cached_data.put({ id: 'last_product_sync', timestamp: Date.now() });
       useSyncStore.getState().setLastSyncTime(Date.now());
       
     } catch (error) {
@@ -86,7 +100,7 @@ export const syncService = {
         await this.seedDefaultAdmin();
       }
 
-      await offlineDB.cached_data.put({ id: 'last_employee_sync', timestamp: Date.now() }, 'last_employee_sync');
+      await offlineDB.cached_data.put({ id: 'last_employee_sync', timestamp: Date.now() });
       useSyncStore.getState().setLastSyncTime(Date.now());
     } catch (error) {
       console.error('Error syncing employees:', error);
@@ -120,7 +134,8 @@ export const syncService = {
     const id = await offlineDB.transactions.add({
       ...transaction,
       synced: false,
-      created_at: transaction.created_at || new Date().toISOString() 
+      // created_at: transaction.created_at || new Date().toISOString()
+      created_at: toISOString(transaction.created_at) 
     });
 
     console.log(`Transaction ${transaction.transaction_number} saved locally with ID ${id}`);
