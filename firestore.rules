@@ -1,19 +1,278 @@
-{"error":{"code":400,"message":"API key not valid. Please pass a valid API key.","errors":[{"message":"API key not valid. Please pass a valid API key.","domain":"global","reason":"badRequest"}],"status":"INVALID_ARGUMENT","details":[{"@type":"type.googleapis.com/google.rpc.ErrorInfo","reason":"API_KEY_INVALID","domain":"googleapis.com","metadata":{"service":"identitytoolkit.googleapis.com"}},{"@type":"type.googleapis.com/google.rpc.LocalizedMessage","locale":"en-US","message":"API key not valid. Please pass a valid API key."}]}}_version = '2';
+// =============================================================================
+// ENTERPRISE POS — Firestore Security Rules
+// =============================================================================
+// App Model:
+//   - PIN-based local authentication (no Firebase Auth on client)
+//   - Sync service writes transactions, reads products & employees from client
+//   - Cloud Functions (Admin SDK) write: audit_logs, moniepoint_webhook_results,
+//     moniepoint_processed_webhooks, system_cache  — Admin SDK bypasses all rules
+//   - Roles: cashier | manager | admin  (enforced client-side + data validation here)
+//
+// Security Strategy (no Firebase Auth on client):
+//   - Validate data SHAPE and REQUIRED FIELDS on every write
+//   - Lock Cloud-Function-only collections to `allow ... : if false`
+//   - Never allow DELETE on financial records (transactions, audit_logs)
+//   - Employees collection: allow create/update (sync needs it), block delete
+//   - Products: allow read/write for sync, block delete via rules + require shape
+//   - Settings: single "global" doc only, updates must include required fields
+//   - Transactions: allow create with valid shape, allow update for void/sync only
+//
+// NOTE: To harden further in future, add Firebase Auth to the client app and
+//       replace `true` read/write guards with `request.auth != null` checks.
+// =============================================================================
+
+rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // This rule allows anyone with your Firestore database reference to view, edit,
-    // and delete all data in your Firestore database. It is useful for getting
-    // started, but it is configured to expire after 30 days because it
-    // leaves your app open to attackers. At that time, all client
-    // requests to your Firestore database will be denied.
-    //
-    // Make sure to write security rules for your app before that time, or else
-    // all client requests to your Firestore database will be denied until you Update
-    // your rules
-    match /{document=**} {
-      allow read, write: if request.time < timestamp.date(2025, 10, 17);
+    // =========================================================================
+    // HELPER FUNCTIONS
+    // =========================================================================
+
+    // Checks that all keys in `required` exist in the incoming data
+    function hasRequiredFields(data, required) {
+      return required.toSet().difference(data.keys().toSet()).size() == 0;
     }
+
+    // Checks that a string field exists, is a string, and is non-empty
+    function isNonEmptyString(value) {
+      return value is string && value.size() > 0;
+    }
+
+    // Validates a role value is one of the three allowed roles
+    function isValidRole(role) {
+      return role in ['cashier', 'manager', 'admin'];
+    }
+
+    // Validates a payment method
+    function isValidPaymentMethod(method) {
+      return method in ['cash', 'card', 'transfer', 'split'];
+    }
+
+    // Validates a payment status
+    function isValidPaymentStatus(status) {
+      return status in ['completed', 'pending', 'void', 'failed'];
+    }
+
+    // Ensures only the permitted fields are being updated (no extra injections)
+    function onlyUpdates(allowed) {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(allowed);
+    }
+
+    // =========================================================================
+    // PRODUCTS COLLECTION
+    // =========================================================================
+    // Read:  POS sync service needs to pull products on startup — allow all reads
+    // Write: Sync service pushes product catalog from Firebase to local — allow
+    //        writes but validate shape so no garbage data enters the catalog.
+    // Delete: Block. Products are deactivated, not deleted, to preserve history.
+    // =========================================================================
+
+    match /products/{productId} {
+      allow read: if true;
+
+      allow create: if
+        hasRequiredFields(request.resource.data, ['name', 'price', 'sku', 'category']) &&
+        isNonEmptyString(request.resource.data.name) &&
+        isNonEmptyString(request.resource.data.sku) &&
+        isNonEmptyString(request.resource.data.category) &&
+        request.resource.data.price is number &&
+        request.resource.data.price >= 0;
+
+      allow update: if
+        isNonEmptyString(request.resource.data.name) &&
+        request.resource.data.price is number &&
+        request.resource.data.price >= 0;
+
+      // Hard block: products are never deleted via client
+      allow delete: if false;
+    }
+
+    // =========================================================================
+    // EMPLOYEES COLLECTION
+    // =========================================================================
+    // SENSITIVE: Contains pin_hash.
+    // Read:   Sync service needs to pull employees for local auth — allow read.
+    // Create: Admin creates employees via settingsService — validate shape.
+    // Update: Allow role/status/lock updates — validate changed fields.
+    // Delete: Hard block. Employees are deactivated (active: false), not deleted.
+    // =========================================================================
+
+    match /employees/{employeeId} {
+      allow read: if true;
+
+      allow create: if
+        hasRequiredFields(request.resource.data, ['name', 'role', 'active', 'pin_hash']) &&
+        isNonEmptyString(request.resource.data.name) &&
+        isValidRole(request.resource.data.role) &&
+        request.resource.data.active is bool &&
+        isNonEmptyString(request.resource.data.pin_hash);
+
+      allow update: if
+        (!('name' in request.resource.data) ||
+          isNonEmptyString(request.resource.data.name)) &&
+        (!('role' in request.resource.data) ||
+          isValidRole(request.resource.data.role)) &&
+        (!('active' in request.resource.data) ||
+          request.resource.data.active is bool) &&
+        (!('is_locked' in request.resource.data) ||
+          request.resource.data.is_locked is bool) &&
+        (!('failed_attempts' in request.resource.data) ||
+          request.resource.data.failed_attempts is number);
+
+      // Hard block: employees are never deleted, only deactivated
+      allow delete: if false;
+    }
+
+    // =========================================================================
+    // TRANSACTIONS COLLECTION
+    // =========================================================================
+    // Read:   Allow — needed for sync status checks and reporting.
+    // Create: Sync service pushes offline transactions — validate core fields.
+    // Update: Only allow specific void/sync fields to be updated, not full rewrites.
+    // Delete: Hard block — transactions are financial records, never deleted.
+    // =========================================================================
+
+    match /transactions/{transactionId} {
+      allow read: if true;
+
+      allow create: if
+        hasRequiredFields(request.resource.data, [
+          'transaction_number',
+          'employee_id',
+          'total',
+          'payment_method',
+          'payment_status',
+          'items'
+        ]) &&
+        isNonEmptyString(request.resource.data.transaction_number) &&
+        isNonEmptyString(request.resource.data.employee_id) &&
+        request.resource.data.total is number &&
+        request.resource.data.total >= 0 &&
+        isValidPaymentMethod(request.resource.data.payment_method) &&
+        isValidPaymentStatus(request.resource.data.payment_status) &&
+        request.resource.data.items is list &&
+        request.resource.data.items.size() > 0;
+
+      allow update: if
+        onlyUpdates([
+          'payment_status',
+          'synced',
+          'void_reason',
+          'void_by',
+          'void_at',
+          'payment_reference',
+          'moniepoint_status'
+        ]) &&
+        (!('payment_status' in request.resource.data) ||
+          isValidPaymentStatus(request.resource.data.payment_status));
+
+      // Hard block: financial records are immutable (void via status update only)
+      allow delete: if false;
+    }
+
+    // =========================================================================
+    // SETTINGS COLLECTION
+    // =========================================================================
+    // Single document: "global". Admins read/write store configuration.
+    // Read:   Allow — settings are non-sensitive (store name, tax rate, etc.)
+    // Create: Only the "global" doc is permitted to exist.
+    // Update: Validate required fields stay intact.
+    // Delete: Hard block — settings document must always exist.
+    // =========================================================================
+
+    match /settings/{settingId} {
+      allow read: if true;
+
+      allow create: if
+        settingId == 'global' &&
+        hasRequiredFields(request.resource.data, [
+          'store_name', 'currency', 'tax_rate', 'tax_enabled'
+        ]) &&
+        isNonEmptyString(request.resource.data.store_name) &&
+        isNonEmptyString(request.resource.data.currency) &&
+        request.resource.data.tax_rate is number &&
+        request.resource.data.tax_enabled is bool;
+
+      allow update: if
+        settingId == 'global' &&
+        (!('store_name' in request.resource.data) ||
+          isNonEmptyString(request.resource.data.store_name)) &&
+        (!('tax_rate' in request.resource.data) ||
+          request.resource.data.tax_rate is number);
+
+      allow delete: if false;
+    }
+
+    // =========================================================================
+    // AUDIT LOGS COLLECTION
+    // =========================================================================
+    // Written by: Cloud Functions (Admin SDK) AND client via logAuditAction().
+    // Read:   Allow — managers/admins view logs in the dashboard.
+    // Create: Allow client appends — validate shape for consistency.
+    // Update: Hard block — audit logs are immutable by design.
+    // Delete: Hard block — audit trail must be preserved.
+    // =========================================================================
+
+    match /audit_logs/{logId} {
+      allow read: if true;
+
+      allow create: if
+        hasRequiredFields(request.resource.data, ['action', 'employee_id', 'timestamp']) &&
+        isNonEmptyString(request.resource.data.action) &&
+        isNonEmptyString(request.resource.data.employee_id);
+
+      // Immutable — audit logs cannot be altered or removed
+      allow update: if false;
+      allow delete: if false;
+    }
+
+    // =========================================================================
+    // MONIEPOINT WEBHOOK RESULTS
+    // =========================================================================
+    // Written ONLY by Cloud Functions via Admin SDK (bypasses rules).
+    // Read by POS client via real-time onSnapshot listener in PaymentModal.
+    // Clients NEVER write here directly.
+    // =========================================================================
+
+    match /moniepoint_webhook_results/{merchantReference} {
+      allow read: if true;
+      allow write: if false; // Cloud Functions Admin SDK only
+    }
+
+    // =========================================================================
+    // MONIEPOINT PROCESSED WEBHOOKS (Idempotency Guard)
+    // =========================================================================
+    // Internal deduplication collection. Cloud Functions only. No client access.
+    // =========================================================================
+
+    match /moniepoint_processed_webhooks/{webhookId} {
+      allow read, write: if false;
+    }
+
+    // =========================================================================
+    // SYSTEM CACHE (OAuth Token Cache)
+    // =========================================================================
+    // Cloud Functions read/write Moniepoint OAuth tokens here.
+    // Clients have absolutely no access.
+    // =========================================================================
+
+    match /system_cache/{cacheKey} {
+      allow read, write: if false;
+    }
+
+    // =========================================================================
+    // CATCH-ALL — DENY EVERYTHING ELSE
+    // =========================================================================
+    // Any collection not explicitly listed above is denied by default.
+    // This prevents accidental exposure if new collections are added without
+    // corresponding rules being written first.
+    // =========================================================================
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
   }
 }

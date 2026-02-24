@@ -26,6 +26,23 @@ function toISOString(value: any): string {
 // Check for mock environment to prevent connection errors
 const IS_MOCK_ENV = ENV.FIREBASE.PROJECT_ID === 'mock-project';
 
+function cleanUndefinedValues(obj: any): any {
+  if (Array.isArray(obj)) {
+    return obj.map(cleanUndefinedValues);
+  }
+  if (obj !== null && typeof obj === 'object' && !(obj instanceof Date)) {
+    const cleaned: any = {};
+    for (const [key, value] of Object.entries(obj)) {
+      if (value !== undefined) {
+        cleaned[key] = cleanUndefinedValues(value);
+      }
+    }
+    return cleaned;
+  }
+  return obj;
+}
+
+
 export const syncService = {
   // Sync Products: Firebase -> IndexedDB
   async syncProductsFromFirebase() {
@@ -141,7 +158,7 @@ export const syncService = {
     console.log(`Transaction ${transaction.transaction_number} saved locally with ID ${id}`);
 
     // Update pending count
-    const pendingCount = await offlineDB.transactions.where({ synced: false }).count();
+    const pendingCount = await offlineDB.transactions.filter(t => !t.synced).count();
     useSyncStore.getState().setPendingCount(pendingCount);
 
     if (navigator.onLine && !IS_MOCK_ENV) {
@@ -154,7 +171,7 @@ export const syncService = {
   async syncPendingTransactions() {
     if (!navigator.onLine || IS_MOCK_ENV) return;
 
-    const pending = await offlineDB.transactions.where({ synced: false }).toArray();
+    const pending = await offlineDB.transactions.filter(t => !t.synced).toArray();
     useSyncStore.getState().setPendingCount(pending.length);
     
     if (pending.length === 0) return;
@@ -166,11 +183,11 @@ export const syncService = {
       try {
         const { id, ...data } = transaction; 
 
-        const firestoreData = {
+        const firestoreData = cleanUndefinedValues({
           ...(data as any),
           created_at: serverTimestamp(),
           synced: true
-        };
+        });
 
         await addDocument('transactions', firestoreData);
         
@@ -184,7 +201,7 @@ export const syncService = {
     }
     
     // Update pending count after sync
-    const remaining = await offlineDB.transactions.where({ synced: false }).count();
+    const remaining = await offlineDB.transactions.filter(t => !t.synced).count();
     useSyncStore.getState().setPendingCount(remaining);
     useSyncStore.getState().setSyncing(false);
   },
@@ -195,7 +212,7 @@ export const syncService = {
     await this.seedDefaultProducts();
 
     // Initial check for pending
-    const pendingCount = await offlineDB.transactions.where({ synced: false }).count();
+    const pendingCount = await offlineDB.transactions.filter(t => !t.synced).count();
     useSyncStore.getState().setPendingCount(pendingCount);
 
     if (navigator.onLine && !IS_MOCK_ENV) {
