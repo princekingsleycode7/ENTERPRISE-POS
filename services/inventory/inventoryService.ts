@@ -1,7 +1,9 @@
-import { addDocument, updateDocument, deleteDocument } from '../firebase/firestore';
+import { addDocument, updateDocument, deleteDocument, getDocuments } from '../firebase/firestore';
 import { offlineDB } from '../offline/db';
 import { Product, AuditLog } from '../../types';
 import { logAuditAction } from '../firebase/audit';
+import { collection, query, where, getDocs } from 'firebase/firestore';
+import { db } from '../firebase/config';
 
 export const inventoryService = {
   // Add a new product
@@ -91,6 +93,83 @@ export const inventoryService = {
     } catch (error) {
       console.error('Error adjusting stock:', error);
       throw error;
+    }
+  },
+
+  // Get product by SKU
+  async getProductBySKU(sku: string): Promise<Product | null> {
+    try {
+      const productsRef = collection(db, 'products');
+      const q = query(productsRef, where('sku', '==', sku));
+      const querySnapshot = await getDocs(q);
+
+      if (querySnapshot.docs.length > 0) {
+        const doc = querySnapshot.docs[0];
+        return {
+          ...doc.data(),
+          firebaseId: doc.id,
+          id: doc.id
+        } as Product;
+      }
+
+      return null;
+    } catch (error) {
+      console.error('Error getting product by SKU:', error);
+      return null;
+    }
+  },
+
+  // Get all products
+  async getAllProducts(): Promise<Product[]> {
+    try {
+      const productsRef = collection(db, 'products');
+      const querySnapshot = await getDocs(productsRef);
+      
+      return querySnapshot.docs.map(doc => ({
+        ...doc.data(),
+        firebaseId: doc.id,
+        id: doc.id
+      })) as Product[];
+    } catch (error) {
+      console.error('Error getting all products:', error);
+      return [];
+    }
+  },
+
+  // Get products by category
+  async getProductsByCategory(category: string): Promise<Product[]> {
+    try {
+      const productsRef = collection(db, 'products');
+      const q = query(productsRef, where('category', '==', category));
+      const querySnapshot = await getDocs(q);
+
+      return querySnapshot.docs.map(doc => ({
+        ...doc.data(),
+        firebaseId: doc.id,
+        id: doc.id
+      })) as Product[];
+    } catch (error) {
+      console.error('Error getting products by category:', error);
+      return [];
+    }
+  },
+
+  // Get low stock products
+  async getLowStockProducts(): Promise<Product[]> {
+    try {
+      const productsRef = collection(db, 'products');
+      const querySnapshot = await getDocs(productsRef);
+
+      return querySnapshot.docs
+        .map(doc => ({
+          ...doc.data(),
+          firebaseId: doc.id,
+          id: doc.id
+        }))
+        .filter(product => product.stock_quantity <= product.reorder_level) as Product[];
+    } catch (error) {
+      console.error('Error getting low stock products:', error);
+      return [];
     }
   }
 };

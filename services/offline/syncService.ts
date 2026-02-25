@@ -36,38 +36,32 @@ function cleanUndefinedValues(obj: any): any {
 
 export const syncService = {
   async syncProductsFromFirebase() {
-    if (IS_MOCK_ENV) { await this.seedDefaultProducts(); return; }
+    if (IS_MOCK_ENV) { 
+      console.log('Mock environment: Skipping product sync from Firebase');
+      return; 
+    }
     try {
       useSyncStore.getState().setSyncing(true);
       const snapshot = await getDocs(collection(firestore, 'products'));
       const products: Product[] = snapshot.docs.map(doc => ({ id: doc.id, ...(doc.data() as any) } as Product));
+      
+      // Always clear and reload from Firebase (no fallback to seed data)
+      await offlineDB.products.clear();
+      
       if (products.length > 0) {
         await offlineDB.products.bulkPut(products);
-      } else {
-        await this.seedDefaultProducts();
       }
+      // If no products in Firebase, database remains empty - user must add via admin UI
+      
       await offlineDB.cached_data.put({ id: 'last_product_sync', timestamp: Date.now() });
       useSyncStore.getState().setLastSyncTime(Date.now());
     } catch (error) {
       console.error('Error syncing products:', error);
-      await this.seedDefaultProducts();
+      // Don't fallback to seed data - let user know data needs to be added via admin
+      console.warn('No products available. Please add products via the admin UI.');
     } finally {
        useSyncStore.getState().setSyncing(false);
     }
-  },
-
-  async seedDefaultProducts() {
-    const count = await offlineDB.products.count();
-    if (count > 0) return;
-    const products: Product[] = [
-      { id: 'prod_1', name: 'Espresso', sku: 'COF001', price: 3.50, cost: 0.50, category: 'Coffee', stock_quantity: 100, reorder_level: 10 },
-      { id: 'prod_2', name: 'Cappuccino', sku: 'COF002', price: 4.50, cost: 0.80, category: 'Coffee', stock_quantity: 80, reorder_level: 10 },
-      { id: 'prod_3', name: 'Latte', sku: 'COF003', price: 4.75, cost: 0.90, category: 'Coffee', stock_quantity: 80, reorder_level: 10 },
-      { id: 'prod_4', name: 'Croissant', sku: 'BAK001', price: 3.00, cost: 0.50, category: 'Bakery', stock_quantity: 20, reorder_level: 5 },
-      { id: 'prod_5', name: 'Muffin', sku: 'BAK002', price: 3.25, cost: 0.60, category: 'Bakery', stock_quantity: 25, reorder_level: 5 },
-      { id: 'prod_6', name: 'Iced Tea', sku: 'DRK001', price: 2.50, cost: 0.20, category: 'Drinks', stock_quantity: 50, reorder_level: 15 },
-    ];
-    await offlineDB.products.bulkPut(products);
   },
 
   async syncEmployeesFromFirebase() {
@@ -153,7 +147,7 @@ export const syncService = {
 
   async init() {
     await this.seedDefaultAdmin();
-    await this.seedDefaultProducts();
+    // Products are now loaded ONLY from Firebase via syncProductsFromFirebase()
 
     const pendingCount = await offlineDB.transactions.filter(t => !t.synced).count();
     useSyncStore.getState().setPendingCount(pendingCount);

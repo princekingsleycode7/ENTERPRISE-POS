@@ -12,7 +12,7 @@ export const ENV = {
     APP_ID: import.meta.env.VITE_FIREBASE_APP_ID as string,
   },
   KORAPAY: {
-    PUBLIC_KEY: process.env.REACT_APP_KORAPAY_PUBLIC_KEY,
+    PUBLIC_KEY: import.meta.env.VITE_KORAPAY_PUBLIC_KEY,
   },
   MONIEPOINT: {
     DEFAULT_TERMINAL_SERIAL: process.env.REACT_APP_MONIEPOINT_TERMINAL_SERIAL || '',

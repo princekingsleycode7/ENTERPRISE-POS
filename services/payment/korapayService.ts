@@ -1,3 +1,4 @@
+// services/payment/korapayService.ts
 import { ENV } from '../../config/env';
 
 interface KorapayConfig {
@@ -62,6 +63,15 @@ export const korapayService = {
     onSuccess: (response: any) => void;
     onClose: () => void;
   }) => {
+    // 1. Verify Public Key Exists BEFORE loading SDK
+    const publicKey = ENV.KORAPAY.PUBLIC_KEY;
+    if (!publicKey || !publicKey.startsWith('pk_')) {
+      console.error("[Korapay Error]: Missing or Invalid VITE_KORAPAY_PUBLIC_KEY in your .env.local file.");
+      alert("Payment gateway configuration error. Please contact the administrator.");
+      params.onClose();
+      return;
+    }
+
     const loaded = await korapayService.loadScript();
     if (!loaded || !window.Korapay) {
       alert("Payment gateway failed to load. Please check internet connection.");
@@ -72,13 +82,17 @@ export const korapayService = {
     // Ensure amount is valid
     if (params.amount <= 0) {
       console.error("Invalid amount");
+      params.onClose();
       return;
     }
 
+    // Convert amount from NGN to kobo (multiply by 100) and ensure it's an integer
+    const amountInKobo = Math.round(params.amount * 100);
+
     window.Korapay.initialize({
-      key: ENV.KORAPAY.PUBLIC_KEY,
+      key: publicKey,
       reference: params.reference,
-      amount: params.amount,
+      amount: amountInKobo,
       currency: 'NGN', // Default to NGN for Korapay
       customer: {
         name: params.customerName || 'Guest Customer',

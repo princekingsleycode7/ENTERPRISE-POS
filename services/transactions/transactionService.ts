@@ -18,10 +18,52 @@ export const transactionService = {
   
   async createTransaction(transactionData: Transaction) {
     try {
+      // Save transaction
       await syncService.saveTransaction(transactionData);
+      
+      // Update product quantities for each item sold
+      for (const item of transactionData.items) {
+        await this.updateProductStockAfterSale(item.productId, item.quantity);
+      }
+      
       return true;
     } catch (error) {
       console.error('Create Transaction Failed:', error);
+      throw error;
+    }
+  },
+
+  async updateProductStockAfterSale(productId: string | number, quantitySold: number) {
+    try {
+      // Get current product
+      const product = await offlineDB.products.get(productId as any);
+      if (!product) {
+        console.warn(`Product ${productId} not found for stock update`);
+        return;
+      }
+
+      // Calculate new stock
+      const newStock = product.stock_quantity - quantitySold;
+      if (newStock < 0) {
+        throw new Error(`Insufficient stock for product ${product.name}`);
+      }
+
+      // Update in Dexie (offline)
+      await offlineDB.products.update(productId as any, { stock_quantity: newStock });
+
+      // Update in Firebase (if online)
+      if (navigator.onLine) {
+        try {
+          await updateDocument('products', product.id as string, { 
+            stock_quantity: newStock,
+            updated_at: new Date().toISOString()
+          });
+        } catch (error) {
+          console.warn(`Failed to update stock in Firebase for ${product.name}, will sync later`, error);
+        }
+      }
+    } catch (error) {
+      console.error(`Error updating stock for product ${productId}:`, error);
       throw error;
     }
   },
@@ -68,6 +110,31 @@ export const transactionService = {
       const tx = await offlineDB.transactions.get(transactionId as any);
       if (!tx) throw new Error("Transaction not found");
       if (tx.payment_status === 'void') throw new Error("Transaction already voided");
+
+      // Restore stock for all items in the voided transaction
+      for (const item of tx.items) {
+        try {
+          const product = await offlineDB.products.get(item.productId as any);
+          if (product) {
+            const restoredStock = product.stock_quantity + item.quantity;
+            await offlineDB.products.update(item.productId as any, { stock_quantity: restoredStock });
+            
+            // Update in Firebase if online
+            if (navigator.onLine) {
+              try {
+                await updateDocument('products', product.id as string, { 
+                  stock_quantity: restoredStock,
+                  updated_at: new Date().toISOString()
+                });
+              } catch (error) {
+                console.warn(`Failed to restore stock in Firebase for ${product.name}`, error);
+              }
+            }
+          }
+        } catch (error) {
+          console.warn(`Error restoring stock for product ${item.productId}:`, error);
+        }
+      }
 
       const updates = {
         payment_status: 'void' as const,

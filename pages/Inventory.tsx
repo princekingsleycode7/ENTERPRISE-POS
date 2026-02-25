@@ -3,11 +3,13 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { offlineDB } from '../services/offline/db';
 import { inventoryService } from '../services/inventory/inventoryService';
 import { Button } from '../components/common/Button';
-import { Plus, Search, Filter, AlertTriangle, Edit2, Trash2, ArrowRightLeft } from 'lucide-react';
+import { Plus, Search, Filter, AlertTriangle, Edit2, Trash2, ArrowRightLeft, Upload, Barcode } from 'lucide-react';
 import { Product } from '../types';
 import { ProductForm } from '../components/inventory/ProductForm';
 import { StockAdjustmentModal } from '../components/inventory/StockAdjustmentModal';
 import { ReauthModal } from '../components/auth/ReauthModal';
+import { CSVImportModal } from '../components/inventory/CSVImportModal';
+import { BarcodeScanner } from '../components/inventory/BarcodeScanner';
 import { useAuthStore } from '../stores/useAuthStore';
 
 export const Inventory: React.FC = () => {
@@ -28,6 +30,9 @@ export const Inventory: React.FC = () => {
   
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [pendingAdjustment, setPendingAdjustment] = useState<{adj: number, reason: string} | null>(null);
+
+  const [isCSVImportOpen, setIsCSVImportOpen] = useState(false);
+  const [isBarcodeOpen, setIsBarcodeOpen] = useState(false);
 
   // Derived Data
   const categories: string[] = useMemo(() => {
@@ -100,13 +105,31 @@ export const Inventory: React.FC = () => {
           <h1 className="text-2xl font-bold text-gray-900">Inventory Management</h1>
           <p className="text-gray-500">Manage products, stock levels, and pricing.</p>
         </div>
-        <Button 
-          onClick={() => { setEditingProduct(undefined); setIsFormOpen(true); }} 
-          className="gap-2"
-        >
-          <Plus size={18} />
-          Add Product
-        </Button>
+        <div className="flex gap-2">
+          <Button 
+            onClick={() => setIsBarcodeOpen(true)}
+            variant="secondary"
+            className="gap-2"
+          >
+            <Barcode size={18} />
+            Scan Barcode
+          </Button>
+          <Button 
+            onClick={() => setIsCSVImportOpen(true)}
+            variant="secondary"
+            className="gap-2"
+          >
+            <Upload size={18} />
+            Import CSV
+          </Button>
+          <Button 
+            onClick={() => { setEditingProduct(undefined); setIsFormOpen(true); }} 
+            className="gap-2"
+          >
+            <Plus size={18} />
+            Add Product
+          </Button>
+        </div>
       </div>
 
       {/* Metrics / Low Stock Alert */}
@@ -263,6 +286,22 @@ export const Inventory: React.FC = () => {
         onClose={() => setIsAuthModalOpen(false)}
         onSuccess={executeAdjustment}
         actionName="authorize stock adjustment"
+      />
+
+      <CSVImportModal
+        isOpen={isCSVImportOpen}
+        onClose={() => setIsCSVImportOpen(false)}
+        onImportComplete={() => setIsCSVImportOpen(false)}
+      />
+
+      <BarcodeScanner
+        isOpen={isBarcodeOpen}
+        onClose={() => setIsBarcodeOpen(false)}
+        mode="lookup"
+        onProductScanned={(product) => {
+          // Scroll to product or show details
+          console.log('Scanned product:', product);
+        }}
       />
     </div>
   );

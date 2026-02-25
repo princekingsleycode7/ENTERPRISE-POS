@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { X, Save, Upload } from 'lucide-react';
+import { X, Save, Upload, Loader } from 'lucide-react';
 import { Product } from '../../types';
 import { Button } from '../common/Button';
 import { useNotificationStore } from '../../stores/useNotificationStore';
+import { storageService } from '../../services/firebase/storage';
 
 interface ProductFormProps {
   isOpen: boolean;
@@ -26,12 +27,14 @@ export const ProductForm: React.FC<ProductFormProps> = ({ isOpen, onClose, onSub
     stock_quantity: 0,
     reorder_level: 10,
     description: '',
-    imageUrl: ''
+    imageUrl: '',
+    barcode: ''
   });
   
   // Validation State
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
+  const [uploading, setUploading] = useState(false);
 
   useEffect(() => {
     if (initialData) {
@@ -44,7 +47,8 @@ export const ProductForm: React.FC<ProductFormProps> = ({ isOpen, onClose, onSub
         stock_quantity: initialData.stock_quantity,
         reorder_level: initialData.reorder_level,
         description: initialData.description || '',
-        imageUrl: initialData.imageUrl || ''
+        imageUrl: initialData.imageUrl || '',
+        barcode: (initialData as any).barcode || ''
       });
     } else {
       // Reset for new product
@@ -57,7 +61,8 @@ export const ProductForm: React.FC<ProductFormProps> = ({ isOpen, onClose, onSub
         stock_quantity: 0,
         reorder_level: 10,
         description: '',
-        imageUrl: ''
+        imageUrl: '',
+        barcode: ''
       });
     }
     setErrors({});
@@ -92,6 +97,35 @@ export const ProductForm: React.FC<ProductFormProps> = ({ isOpen, onClose, onSub
       addNotification('error', 'Failed to save product. Please try again.');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setUploading(true);
+    try {
+      // Use Firebase ID if available, otherwise use SKU
+      const productId = initialData?.firebaseId || initialData?.id || formData.sku;
+      
+      // Upload to Cloud Storage
+      const downloadUrl = await storageService.uploadProductImage(file, String(productId));
+      
+      // Replace old image if updating
+      if (initialData?.imageUrl && initialData.imageUrl !== downloadUrl) {
+        await storageService.deleteProductImage(initialData.imageUrl).catch(err => {
+          console.warn('Failed to delete old image:', err);
+        });
+      }
+      
+      setFormData({ ...formData, imageUrl: downloadUrl });
+      addNotification('success', 'Image uploaded successfully!');
+    } catch (error) {
+      console.error('Image upload error:', error);
+      addNotification('error', error instanceof Error ? error.message : 'Failed to upload image');
+    } finally {
+      setUploading(false);
     }
   };
 
@@ -236,33 +270,74 @@ export const ProductForm: React.FC<ProductFormProps> = ({ isOpen, onClose, onSub
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Image URL</label>
-            <div className="flex gap-2">
-              <input
-                type="url"
-                placeholder="https://example.com/image.jpg"
-                className="flex-1 border border-gray-300 rounded-lg p-2 focus:ring-2 focus:ring-blue-500 outline-none"
-                value={formData.imageUrl}
-                onChange={e => setFormData({ ...formData, imageUrl: e.target.value })}
-              />
-              <div className="w-10 h-10 bg-gray-100 rounded-lg border border-gray-200 flex items-center justify-center overflow-hidden">
-                {formData.imageUrl ? (
-                  <img src={formData.imageUrl} alt="Preview" className="w-full h-full object-cover" />
-                ) : (
-                  <Upload size={16} className="text-gray-400" />
+            <label className="block text-sm font-medium text-gray-700 mb-1">Product Image</label>
+            <div className="flex gap-3">
+              <div className="flex-1">
+                <div className="relative">
+                  <input
+                    type="file"
+                    id="image-upload"
+                    accept="image/*"
+                    onChange={handleImageUpload}
+                    disabled={uploading}
+                    className="sr-only"
+                  />
+                  <label
+                    htmlFor="image-upload"
+                    className={`flex items-center justify-center gap-2 w-full border-2 border-dashed border-gray-300 rounded-lg p-4 cursor-pointer hover:border-blue-500 hover:bg-blue-50 transition-colors ${
+                      uploading ? 'opacity-50 cursor-not-allowed' : ''
+                    }`}
+                  >
+                    {uploading ? (
+                      <>
+                        <Loader size={18} className="animate-spin text-blue-500" />
+                        <span className="text-sm text-gray-600">Uploading...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Upload size={18} className="text-gray-400" />
+                        <span className="text-sm text-gray-600">
+                          {formData.imageUrl ? 'Change image' : 'Click to upload image'}
+                        </span>
+                      </>
+                    )}
+                  </label>
+                </div>
+                {formData.imageUrl && (
+                  <p className="text-xs text-gray-500 mt-2 truncate">Image uploaded: {formData.imageUrl.split('/').pop()}</p>
                 )}
               </div>
+              {formData.imageUrl && (
+                <div className="w-20 h-20 bg-gray-100 rounded-lg border border-gray-200 overflow-hidden flex-shrink-0">
+                  <img src={formData.imageUrl} alt="Preview" className="w-full h-full object-cover" />
+                </div>
+              )}
             </div>
           </div>
 
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
-            <textarea
-              rows={3}
-              className="w-full border border-gray-300 rounded-lg p-2 focus:ring-2 focus:ring-blue-500 outline-none"
-              value={formData.description}
-              onChange={e => setFormData({ ...formData, description: e.target.value })}
-            />
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Barcode / UPC</label>
+              <input
+                type="text"
+                placeholder="e.g., 1234567890123"
+                className="w-full border border-gray-300 rounded-lg p-2 focus:ring-2 focus:ring-blue-500 outline-none"
+                value={formData.barcode}
+                onChange={e => setFormData({ ...formData, barcode: e.target.value })}
+              />
+              <p className="text-xs text-gray-500 mt-1">Optional: Assign barcode/UPC code to this product</p>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
+              <input
+                type="text"
+                placeholder="e.g., Single shot espresso"
+                className="w-full border border-gray-300 rounded-lg p-2 focus:ring-2 focus:ring-blue-500 outline-none"
+                value={formData.description}
+                onChange={e => setFormData({ ...formData, description: e.target.value })}
+              />
+            </div>
           </div>
 
           <div className="flex justify-end gap-3 pt-4 border-t border-gray-100">
