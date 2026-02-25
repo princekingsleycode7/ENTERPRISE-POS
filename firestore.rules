@@ -1,26 +1,4 @@
-// =============================================================================
-// ENTERPRISE POS — Firestore Security Rules
-// =============================================================================
-// App Model:
-//   - PIN-based local authentication (no Firebase Auth on client)
-//   - Sync service writes transactions, reads products & employees from client
-//   - Cloud Functions (Admin SDK) write: audit_logs, moniepoint_webhook_results,
-//     moniepoint_processed_webhooks, system_cache  — Admin SDK bypasses all rules
-//   - Roles: cashier | manager | admin  (enforced client-side + data validation here)
-//
-// Security Strategy (no Firebase Auth on client):
-//   - Validate data SHAPE and REQUIRED FIELDS on every write
-//   - Lock Cloud-Function-only collections to `allow ... : if false`
-//   - Never allow DELETE on financial records (transactions, audit_logs)
-//   - Employees collection: allow create/update (sync needs it), block delete
-//   - Products: allow read/write for sync, block delete via rules + require shape
-//   - Settings: single "global" doc only, updates must include required fields
-//   - Transactions: allow create with valid shape, allow update for void/sync only
-//
-// NOTE: To harden further in future, add Firebase Auth to the client app and
-//       replace `true` read/write guards with `request.auth != null` checks.
-// =============================================================================
-
+// firestore.rules
 rules_version = '2';
 
 service cloud.firestore {
@@ -30,43 +8,34 @@ service cloud.firestore {
     // HELPER FUNCTIONS
     // =========================================================================
 
-    // Checks that all keys in `required` exist in the incoming data
     function hasRequiredFields(data, required) {
       return required.toSet().difference(data.keys().toSet()).size() == 0;
     }
 
-    // Checks that a string field exists, is a string, and is non-empty
     function isNonEmptyString(value) {
       return value is string && value.size() > 0;
     }
 
-    // Validates a role value is one of the three allowed roles
     function isValidRole(role) {
       return role in ['cashier', 'manager', 'admin'];
     }
 
-    // Validates a payment method
+    // FIX: Added 'bank_transfer' and 'moniepoint' to match app types
     function isValidPaymentMethod(method) {
-      return method in ['cash', 'card', 'transfer', 'split'];
+      return method in ['cash', 'card', 'bank_transfer', 'moniepoint', 'transfer', 'split'];
     }
 
-    // Validates a payment status
+    // FIX: Added 'paid' to match app types
     function isValidPaymentStatus(status) {
-      return status in ['completed', 'pending', 'void', 'failed'];
+      return status in ['completed', 'paid', 'pending', 'void', 'failed'];
     }
 
-    // Ensures only the permitted fields are being updated (no extra injections)
     function onlyUpdates(allowed) {
       return request.resource.data.diff(resource.data).affectedKeys().hasOnly(allowed);
     }
 
     // =========================================================================
     // PRODUCTS COLLECTION
-    // =========================================================================
-    // Read:  POS sync service needs to pull products on startup — allow all reads
-    // Write: Sync service pushes product catalog from Firebase to local — allow
-    //        writes but validate shape so no garbage data enters the catalog.
-    // Delete: Block. Products are deactivated, not deleted, to preserve history.
     // =========================================================================
 
     match /products/{productId} {
@@ -81,22 +50,15 @@ service cloud.firestore {
         request.resource.data.price >= 0;
 
       allow update: if
-        isNonEmptyString(request.resource.data.name) &&
-        request.resource.data.price is number &&
-        request.resource.data.price >= 0;
+        (!('name' in request.resource.data) || isNonEmptyString(request.resource.data.name)) &&
+        (!('price' in request.resource.data) || (request.resource.data.price is number && request.resource.data.price >= 0));
 
-      // Hard block: products are never deleted via client
-      allow delete: if false;
+      // FIX: App supports deleting products
+      allow delete: if true;
     }
 
     // =========================================================================
     // EMPLOYEES COLLECTION
-    // =========================================================================
-    // SENSITIVE: Contains pin_hash.
-    // Read:   Sync service needs to pull employees for local auth — allow read.
-    // Create: Admin creates employees via settingsService — validate shape.
-    // Update: Allow role/status/lock updates — validate changed fields.
-    // Delete: Hard block. Employees are deactivated (active: false), not deleted.
     // =========================================================================
 
     match /employees/{employeeId} {
@@ -121,17 +83,11 @@ service cloud.firestore {
         (!('failed_attempts' in request.resource.data) ||
           request.resource.data.failed_attempts is number);
 
-      // Hard block: employees are never deleted, only deactivated
       allow delete: if false;
     }
 
     // =========================================================================
     // TRANSACTIONS COLLECTION
-    // =========================================================================
-    // Read:   Allow — needed for sync status checks and reporting.
-    // Create: Sync service pushes offline transactions — validate core fields.
-    // Update: Only allow specific void/sync fields to be updated, not full rewrites.
-    // Delete: Hard block — transactions are financial records, never deleted.
     // =========================================================================
 
     match /transactions/{transactionId} {
@@ -168,18 +124,11 @@ service cloud.firestore {
         (!('payment_status' in request.resource.data) ||
           isValidPaymentStatus(request.resource.data.payment_status));
 
-      // Hard block: financial records are immutable (void via status update only)
       allow delete: if false;
     }
 
     // =========================================================================
     // SETTINGS COLLECTION
-    // =========================================================================
-    // Single document: "global". Admins read/write store configuration.
-    // Read:   Allow — settings are non-sensitive (store name, tax rate, etc.)
-    // Create: Only the "global" doc is permitted to exist.
-    // Update: Validate required fields stay intact.
-    // Delete: Hard block — settings document must always exist.
     // =========================================================================
 
     match /settings/{settingId} {
@@ -208,12 +157,6 @@ service cloud.firestore {
     // =========================================================================
     // AUDIT LOGS COLLECTION
     // =========================================================================
-    // Written by: Cloud Functions (Admin SDK) AND client via logAuditAction().
-    // Read:   Allow — managers/admins view logs in the dashboard.
-    // Create: Allow client appends — validate shape for consistency.
-    // Update: Hard block — audit logs are immutable by design.
-    // Delete: Hard block — audit trail must be preserved.
-    // =========================================================================
 
     match /audit_logs/{logId} {
       allow read: if true;
@@ -223,7 +166,6 @@ service cloud.firestore {
         isNonEmptyString(request.resource.data.action) &&
         isNonEmptyString(request.resource.data.employee_id);
 
-      // Immutable — audit logs cannot be altered or removed
       allow update: if false;
       allow delete: if false;
     }
@@ -231,20 +173,14 @@ service cloud.firestore {
     // =========================================================================
     // MONIEPOINT WEBHOOK RESULTS
     // =========================================================================
-    // Written ONLY by Cloud Functions via Admin SDK (bypasses rules).
-    // Read by POS client via real-time onSnapshot listener in PaymentModal.
-    // Clients NEVER write here directly.
-    // =========================================================================
 
     match /moniepoint_webhook_results/{merchantReference} {
       allow read: if true;
-      allow write: if false; // Cloud Functions Admin SDK only
+      allow write: if false; 
     }
 
     // =========================================================================
-    // MONIEPOINT PROCESSED WEBHOOKS (Idempotency Guard)
-    // =========================================================================
-    // Internal deduplication collection. Cloud Functions only. No client access.
+    // MONIEPOINT PROCESSED WEBHOOKS
     // =========================================================================
 
     match /moniepoint_processed_webhooks/{webhookId} {
@@ -252,23 +188,12 @@ service cloud.firestore {
     }
 
     // =========================================================================
-    // SYSTEM CACHE (OAuth Token Cache)
-    // =========================================================================
-    // Cloud Functions read/write Moniepoint OAuth tokens here.
-    // Clients have absolutely no access.
+    // SYSTEM CACHE
     // =========================================================================
 
     match /system_cache/{cacheKey} {
       allow read, write: if false;
     }
-
-    // =========================================================================
-    // CATCH-ALL — DENY EVERYTHING ELSE
-    // =========================================================================
-    // Any collection not explicitly listed above is denied by default.
-    // This prevents accidental exposure if new collections are added without
-    // corresponding rules being written first.
-    // =========================================================================
 
     match /{document=**} {
       allow read, write: if false;

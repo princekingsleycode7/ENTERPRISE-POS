@@ -1,29 +1,24 @@
+// services/transactions/transactionService.ts
 import { offlineDB } from '../offline/db';
 import { Transaction, DailyCashRegister, User } from '../../types';
 import { updateDocument } from '../firebase/firestore';
 import { logAuditAction } from '../firebase/audit';
 import { syncService } from '../offline/syncService';
 
+function toISOString(value: any): string {
+  if (!value) return new Date().toISOString();
+  if (typeof value === 'string') return value;
+  if (value instanceof Date) return value.toISOString();
+  if (typeof value.toDate === 'function') return value.toDate().toISOString(); 
+  if (typeof value.seconds === 'number') return new Date(value.seconds * 1000).toISOString();
+  return new Date().toISOString();
+}
+
 export const transactionService = {
   
-  // --- Transaction Logic ---
-
   async createTransaction(transactionData: Transaction) {
     try {
-      // 1. Save to local IndexedDB
-      // The syncService will pick this up if synced=false and network is available
       await syncService.saveTransaction(transactionData);
-      
-      // 2. Update Daily Register if open (Track cash)
-      if (transactionData.payment_method === 'cash') {
-        const openRegister = await this.getCurrentRegister(transactionData.employee_id);
-        if (openRegister) {
-          // We don't necessarily update the register object on every sale in DB,
-          // but we will calculate totals dynamically when closing.
-          // However, you could incrementally update 'current_cash' here if desired.
-        }
-      }
-
       return true;
     } catch (error) {
       console.error('Create Transaction Failed:', error);
@@ -39,15 +34,11 @@ export const transactionService = {
     searchTerm?: string;
   }) {
     let collection = offlineDB.transactions.orderBy('created_at').reverse();
-
-    // Dexie filtering
     let results = await collection.toArray();
 
     if (filters.startDate && filters.endDate) {
-      // Validate dates
       const start = new Date(filters.startDate);
       const end = new Date(filters.endDate);
-      
       if (!isNaN(start.getTime()) && !isNaN(end.getTime())) {
         results = results.filter(t => {
           const d = new Date(t.created_at);
@@ -59,11 +50,9 @@ export const transactionService = {
     if (filters.status && filters.status !== 'all') {
       results = results.filter(t => t.payment_status === filters.status);
     }
-
     if (filters.employeeId && filters.employeeId !== 'all') {
       results = results.filter(t => t.employee_id === filters.employeeId);
     }
-
     if (filters.searchTerm) {
       const lower = filters.searchTerm.toLowerCase();
       results = results.filter(t => 
@@ -71,16 +60,13 @@ export const transactionService = {
         t.payment_reference?.toLowerCase().includes(lower)
       );
     }
-
     return results;
   },
 
   async voidTransaction(transactionId: number | string, reason: string, manager: User) {
     try {
-      // 1. Get Transaction
       const tx = await offlineDB.transactions.get(transactionId as any);
       if (!tx) throw new Error("Transaction not found");
-
       if (tx.payment_status === 'void') throw new Error("Transaction already voided");
 
       const updates = {
@@ -88,29 +74,29 @@ export const transactionService = {
         void_reason: reason,
         void_by: manager.id,
         void_at: new Date().toISOString(),
-        synced: false // Mark false to trigger sync update
+        synced: false
       };
 
-      // 2. Update Local
       await offlineDB.transactions.update(transactionId as any, updates);
 
-      // 3. Update Firebase (if online/id exists)
-      // Note: If the transaction was created offline and has no Firebase ID (string), 
-      // the sync service will eventually handle it. If it has a string ID, we update directly.
-      if (typeof transactionId === 'string' && navigator.onLine) {
-        await updateDocument('transactions', transactionId, {
-            payment_status: 'void',
-            void_reason: reason,
-            void_by: manager.id,
-            void_at: updates.void_at
-        });
+      // FIX: Force online void directly targeting the predictable transaction number logic
+      if (navigator.onLine) {
+        try {
+          await updateDocument('transactions', tx.transaction_number, {
+              payment_status: 'void',
+              void_reason: reason,
+              void_by: manager.id,
+              void_at: updates.void_at,
+              synced: true
+          });
+          await offlineDB.transactions.update(transactionId as any, { synced: true });
+        } catch (e) {
+          console.warn("Failed to update Firebase immediately, will sync later", e);
+        }
       }
 
-      // 4. Log Audit
       await logAuditAction('VOID_TRANSACTION', `Transaction:${tx.transaction_number}`, {
-        reason,
-        amount: tx.total,
-        manager_id: manager.id
+        reason, amount: tx.total, manager_id: manager.id
       });
 
       return true;
@@ -121,9 +107,7 @@ export const transactionService = {
   },
 
   // --- Daily Register Logic ---
-
   async getCurrentRegister(employeeId: string): Promise<DailyCashRegister | undefined> {
-    // Improved query using explicit index
     return await offlineDB.daily_registers
       .where('employee_id').equals(employeeId)
       .filter(r => r.status === 'open')
@@ -135,46 +119,27 @@ export const transactionService = {
     if (existing) throw new Error("Register already open");
 
     const register: DailyCashRegister = {
-      employee_id: employee.id,
-      employee_name: employee.name,
-      opening_amount: openingAmount,
-      start_time: new Date().toISOString(),
-      status: 'open'
+      employee_id: employee.id, employee_name: employee.name, opening_amount: openingAmount,
+      start_time: new Date().toISOString(), status: 'open'
     };
-
     await offlineDB.daily_registers.add(register);
     await logAuditAction('OPEN_REGISTER', `Employee:${employee.name}`, { amount: openingAmount });
   },
 
   async getRegisterTotals(register: DailyCashRegister) {
-    // Validate start_time is a valid string for IDB range query
     if (!register.start_time || typeof register.start_time !== 'string') {
-       console.warn("Register missing valid start_time, cannot calculate totals accurately.");
        return { cashSales: 0, transactionsCount: 0, expectedCash: register.opening_amount };
     }
 
-    // Calculate total cash sales since register start time
     const transactions = await offlineDB.transactions
-      //.where('created_at').aboveOrEqual(register.start_time)
       .where('created_at').aboveOrEqual(toISOString(register.start_time))
       .toArray();
     
-    // Filter for this employee and Cash payments that are NOT void
     const cashSales = transactions
-      .filter(t => 
-        t.employee_id === register.employee_id && 
-        t.payment_method === 'cash' && 
-        t.payment_status === 'paid'
-      )
+      .filter(t => t.employee_id === register.employee_id && t.payment_method === 'cash' && t.payment_status === 'paid')
       .reduce((sum, t) => sum + t.total, 0);
 
-    const expectedCash = register.opening_amount + cashSales;
-    
-    return {
-      cashSales,
-      transactionsCount: transactions.length,
-      expectedCash
-    };
+    return { cashSales, transactionsCount: transactions.length, expectedCash: register.opening_amount + cashSales };
   },
 
   async closeRegister(registerId: number, actualCash: number, notes?: string) {
@@ -182,21 +147,13 @@ export const transactionService = {
     if (!register) throw new Error("Register not found");
 
     const { expectedCash } = await this.getRegisterTotals(register);
-    const discrepancy = actualCash - expectedCash!;
-
     const updates = {
-      closing_amount: actualCash,
-      expected_cash: expectedCash,
-      actual_cash: actualCash,
-      discrepancy,
-      status: 'closed' as const,
-      end_time: new Date().toISOString(),
-      notes
+      closing_amount: actualCash, expected_cash: expectedCash, actual_cash: actualCash,
+      discrepancy: actualCash - expectedCash!, status: 'closed' as const, end_time: new Date().toISOString(), notes
     };
 
     await offlineDB.daily_registers.update(registerId, updates);
     await logAuditAction('CLOSE_REGISTER', `Register:${registerId}`, updates);
-
     return updates;
   }
 };
