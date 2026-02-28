@@ -212,12 +212,11 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-60 z-50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl shadow-2xl max-w-4xl w-full flex overflow-hidden"
-        style={{ minHeight: 600 }}>
+    <div className="fixed inset-0 bg-black bg-opacity-90 z-50 flex items-center justify-center p-2 md:p-4 backdrop-blur-sm">
+      <div className="bg-white rounded-3xl md:rounded-2xl shadow-2xl max-w-4xl w-full flex flex-col md:flex-row overflow-hidden max-h-[90vh] md:max-h-[600px]">
 
         {/* ── Left: Payment Methods ── */}
-        <div className="w-1/3 bg-gray-50 border-r border-gray-200 p-6 flex flex-col">
+        <div className="hidden md:flex md:w-1/3 bg-gray-50 border-r border-gray-200 p-6 flex-col">
           <h2 className="text-xl font-bold text-gray-900 mb-6">Payment Method</h2>
 
           <div className="space-y-3 flex-1">
@@ -280,17 +279,71 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
           </div>
         </div>
 
-        {/* ── Right: Method-specific Panel ── */}
-        <div className="flex-1 p-6 flex flex-col relative">
+        {/* ── Right: Method-specific Panel / Mobile Full-screen ── */}
+        <div className="w-full md:flex-1 md:w-2/3 p-6 flex flex-col relative overflow-y-auto">
           {/* Close button */}
           <button onClick={onClose} disabled={processing && method === 'moniepoint' && terminalState === 'waiting'}
             className="absolute top-4 right-4 text-gray-400 hover:text-gray-600">
             <X size={24} />
           </button>
 
+          {/* Mobile Payment Method Selector */}
+          <div className="md:hidden mb-6 pt-2">
+            <h3 className="text-sm font-bold text-gray-600 mb-3 uppercase tracking-wide">Select Payment</h3>
+            <div className="grid grid-cols-2 gap-3">
+              <button onClick={() => setMethod('cash')} disabled={processing}
+                className={`p-3 rounded-xl flex flex-col items-center gap-1 transition-all text-xs font-semibold ${
+                  method === 'cash'
+                    ? 'bg-blue-600 text-white shadow-md'
+                    : 'bg-white text-gray-700 border border-gray-200'
+                }`}>
+                <Banknote size={20} />
+                <span>Cash</span>
+              </button>
+
+              <button onClick={() => setMethod('card')} disabled={processing}
+                className={`p-3 rounded-xl flex flex-col items-center gap-1 transition-all text-xs font-semibold ${
+                  method === 'card'
+                    ? 'bg-blue-600 text-white shadow-md'
+                    : 'bg-white text-gray-700 border border-gray-200'
+                }`}>
+                <CreditCard size={20} />
+                <span>Card</span>
+              </button>
+
+              <button onClick={() => setMethod('bank_transfer')} disabled={processing}
+                className={`p-3 rounded-xl flex flex-col items-center gap-1 transition-all text-xs font-semibold ${
+                  method === 'bank_transfer'
+                    ? 'bg-blue-600 text-white shadow-md'
+                    : 'bg-white text-gray-700 border border-gray-200'
+                }`}>
+                <Building2 size={20} />
+                <span>Bank</span>
+              </button>
+
+              <button onClick={() => setMethod('moniepoint')} disabled={processing}
+                className={`p-3 rounded-xl flex flex-col items-center gap-1 transition-all text-xs font-semibold ${
+                  method === 'moniepoint'
+                    ? 'bg-green-600 text-white shadow-md'
+                    : 'bg-white text-gray-700 border border-gray-200'
+                }`}>
+                <Smartphone size={20} />
+                <span>Moniepoint</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Total Amount Summary (Mobile) */}
+          <div className="md:hidden mb-4 p-4 bg-blue-50 rounded-xl border border-blue-200">
+            <p className="text-xs text-blue-600 opacity-70">Total Due</p>
+            <p className="text-2xl font-bold text-blue-600">₦{totalAmount.toLocaleString('en-NG', {
+              minimumFractionDigits: 2
+            })}</p>
+          </div>
+
           {/* ── CASH ── */}
           {method === 'cash' && (
-            <div className="flex flex-col h-full">
+            <div className="flex flex-col md:h-full">
               <h3 className="text-lg font-bold mb-4">Cash Payment</h3>
               <p className="text-sm text-gray-500 mb-3">Enter amount tendered by customer:</p>
               <div className="bg-gray-100 rounded-xl p-4 text-center mb-4">
@@ -298,7 +351,9 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
                   ₦{parseFloat(amountTendered || '0').toLocaleString('en-NG', { minimumFractionDigits: 2 })}
                 </span>
               </div>
-              <NumPad onNumberClick={handleNumPad} onClear={handleClear} />
+              <div className="flex-1 md:flex-1 overflow-y-auto mb-4 md:mb-0">
+                <NumPad onNumberClick={handleNumPad} onClear={handleClear} />
+              </div>
               {isCashSufficient && (
                 <div className="bg-green-50 border border-green-200 rounded-xl p-3 mt-3 flex justify-between">
                   <span className="text-green-700 font-medium">Change:</span>
@@ -317,7 +372,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
 
           {/* ── KORAPAY CARD / BANK TRANSFER ── */}
           {(method === 'card' || method === 'bank_transfer') && (
-            <div className="flex flex-col h-full justify-center gap-4">
+            <div className="flex flex-col md:h-full md:justify-center gap-4">
               <h3 className="text-lg font-bold">
                 {method === 'card' ? 'Card Payment (KoraPay)' : 'Bank Transfer (KoraPay)'}
               </h3>
@@ -352,7 +407,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
 
           {/* ── MONIEPOINT POS ── */}
           {method === 'moniepoint' && (
-            <div className="flex flex-col h-full gap-4">
+            <div className="flex flex-col md:h-full gap-4">
               <h3 className="text-lg font-bold text-green-700">Moniepoint POS Terminal</h3>
 
               {/* Sub-method selector */}

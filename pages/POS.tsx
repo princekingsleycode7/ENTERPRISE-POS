@@ -4,6 +4,7 @@ import { offlineDB } from '../services/offline/db';
 import { useCartStore } from '../stores/useCartStore';
 import { Search } from 'lucide-react';
 import { Cart } from '../components/pos/Cart';
+import { MobilePOS } from '../components/pos/MobilePOS';
 import { Product } from '../types';
 
 export const POS: React.FC = () => {
@@ -87,8 +88,14 @@ export const POS: React.FC = () => {
   }, [products, addToCart]);
 
   return (
-    <div className="flex h-screen overflow-hidden bg-gray-100">
-      {/* Left Panel: Product Grid */}
+    <>
+      {/* Mobile View (hidden on md and above) */}
+      <div className="md:hidden w-full">
+        <MobilePOS />
+      </div>
+
+      {/* Desktop View (hidden on sm and below) */}
+      <div className="hidden md:flex h-screen overflow-hidden bg-gray-100">
       <div className="flex-1 flex flex-col min-w-0">
         {/* Header Bar */}
         <div className="bg-white p-4 border-b border-gray-200 shadow-sm z-10">
@@ -193,6 +200,7 @@ export const POS: React.FC = () => {
       <div className="w-[400px] min-w-[350px] relative z-20">
          <Cart />
       </div>
-    </div>
+      </div>
+    </>
   );
 };
