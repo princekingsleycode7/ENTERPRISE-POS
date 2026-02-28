@@ -49,7 +49,7 @@ export class OfflineDB extends Dexie {
         products: "id, sku, category, name, stock_quantity",
         employees: "id, name, role, pin_hash, is_locked",
         transactions:
-          "++id, transaction_number, created_at, payment_status, employee_id, synced",
+          "++id, transaction_number, created_at, payment_status, employee_id, synced, merchant_id, platform_fee_status",
         daily_registers: "++id, employee_id, status, start_time",
         audit_logs: "++id, employee_id, action, timestamp",
         settings: "id",
@@ -67,6 +67,20 @@ export class OfflineDB extends Dexie {
             });
           }
         }
+      });
+
+    // Version 8: Platform Fee Fields (Phase 2)
+    (this as any)
+      .version(8)
+      .stores({
+        products: "id, sku, category, name, stock_quantity",
+        employees: "id, name, role, pin_hash, is_locked",
+        transactions:
+          "++id, transaction_number, created_at, payment_status, employee_id, synced, merchant_id, platform_fee_status",
+        daily_registers: "++id, employee_id, status, start_time",
+        audit_logs: "++id, employee_id, action, timestamp",
+        settings: "id",
+        cached_data: "id, type",
       });
   }
 }

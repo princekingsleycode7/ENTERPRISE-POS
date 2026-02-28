@@ -1,9 +1,10 @@
 // services/transactions/transactionService.ts
 import { offlineDB } from '../offline/db';
-import { Transaction, DailyCashRegister, User } from '../../types';
+import { Transaction, DailyCashRegister, User, Merchant } from '../../types';
 import { updateDocument } from '../firebase/firestore';
 import { logAuditAction } from '../firebase/audit';
 import { syncService } from '../offline/syncService';
+import { getMerchant } from '../merchant/merchantService';
 
 function toISOString(value: any): string {
   if (!value) return new Date().toISOString();
@@ -18,6 +19,37 @@ export const transactionService = {
   
   async createTransaction(transactionData: Transaction) {
     try {
+      // Phase 2: Calculate platform fees before saving
+      if (transactionData.merchant_id) {
+        try {
+          const merchant = await getMerchant(transactionData.merchant_id);
+          if (merchant) {
+            const feeRate = merchant.platformFeeRate ?? 0.01;
+            const platformFee = Math.round(transactionData.total * feeRate * 100) / 100; // round to 2dp
+            
+            transactionData.platform_fee = platformFee;
+            transactionData.platform_fee_rate = feeRate;
+            transactionData.platform_fee_status = 'pending';
+          } else {
+            console.warn(`Merchant ${transactionData.merchant_id} not found for fee calculation`);
+            // Use default fee rate if merchant not found
+            const feeRate = 0.01;
+            const platformFee = Math.round(transactionData.total * feeRate * 100) / 100;
+            transactionData.platform_fee = platformFee;
+            transactionData.platform_fee_rate = feeRate;
+            transactionData.platform_fee_status = 'pending';
+          }
+        } catch (error) {
+          console.warn(`Error calculating platform fees for transaction:`, error);
+          // Gracefully fallback to default fee rate
+          const feeRate = 0.01;
+          const platformFee = Math.round(transactionData.total * feeRate * 100) / 100;
+          transactionData.platform_fee = platformFee;
+          transactionData.platform_fee_rate = feeRate;
+          transactionData.platform_fee_status = 'pending';
+        }
+      }
+      
       // Save transaction
       await syncService.saveTransaction(transactionData);
       

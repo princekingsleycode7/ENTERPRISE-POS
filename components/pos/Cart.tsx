@@ -21,6 +21,7 @@ export const Cart: React.FC<CartProps> = ({ onCheckoutSuccess }) => {
     updateQuantity, 
     removeFromCart, 
     getTotal, 
+    getTax,
     clearCart, 
     holdTransaction, 
     heldTransactions, 
@@ -38,7 +39,7 @@ export const Cart: React.FC<CartProps> = ({ onCheckoutSuccess }) => {
   const [showConfirmVoid, setShowConfirmVoid] = useState(false);
 
   const subtotal = getTotal();
-  const tax = subtotal * taxRate;
+  const tax = getTax(); // Per-item tax calculation (VAT Exempt items taxed at 0%)
   const total = subtotal + tax;
 
   const handlePaymentComplete = async (method: 'cash' | 'card' | 'bank_transfer' | 'moniepoint', details: any) => {
@@ -68,7 +69,9 @@ export const Cart: React.FC<CartProps> = ({ onCheckoutSuccess }) => {
         amount_tendered: method === 'cash' ? details.amountTendered : undefined,
         change_amount: method === 'cash' ? details.change : undefined,
         created_at: new Date().toISOString(),
-        synced: false
+        synced: false,
+        // Platform fees will be calculated in transactionService
+        merchant_id: user.merchantId || undefined
       };
 
       await transactionService.createTransaction(transaction);

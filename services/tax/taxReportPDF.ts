@@ -1,0 +1,409 @@
+/**
+ * services/tax/taxReportPDF.ts
+ *
+ * PDF Report Generation for Tax Compliance
+ * Generates VAT returns, CIT estimates, and annual tax summaries in FIRS-compliant format
+ */
+
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
+import { offlineDB } from '../offline/db';
+import { Transaction, DeductionReport } from '../../types';
+
+interface PDFOptions {
+  title: string;
+  businessName: string;
+  businessAddress: string;
+  businessTIN: string;
+}
+
+/**
+ * Generate a professional VAT Return PDF (Monthly)
+ */
+export async function generateVATReport(
+  month: number,
+  year: number,
+  options?: Partial<PDFOptions>
+): Promise<Blob> {
+  const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const pageHeight = doc.internal.pageSize.getHeight();
+  let yPos = 15;
+
+  // Default options
+  const businessName = options?.businessName || 'Your Business Name';
+  const businessAddress = options?.businessAddress || 'Business Address';
+  const businessTIN = options?.businessTIN || 'TIN: Not Set';
+
+  // Header
+  doc.setFontSize(14);
+  doc.setFont(undefined, 'bold');
+  doc.text('FEDERAL INLAND REVENUE SERVICE (FIRS)', pageWidth / 2, yPos, { align: 'center' });
+  yPos += 8;
+
+  doc.setFontSize(12);
+  doc.text('VAT RETURN FORM', pageWidth / 2, yPos, { align: 'center' });
+  yPos += 10;
+
+  // Business Info
+  doc.setFontSize(10);
+  doc.setFont(undefined, 'normal');
+  doc.text(`Business Name: ${businessName}`, 15, yPos);
+  yPos += 6;
+  doc.text(`Address: ${businessAddress}`, 15, yPos);
+  yPos += 6;
+  doc.text(`${businessTIN}`, 15, yPos);
+  yPos += 6;
+
+  const monthName = new Date(year, month - 1).toLocaleString('en-US', { month: 'long' });
+  doc.text(`Period: ${monthName} ${year}`, 15, yPos);
+  yPos += 10;
+
+  // Fetch transactions for the month
+  const startDate = new Date(year, month - 1, 1);
+  const endDate = new Date(year, month, 0);
+
+  let transactions: Transaction[] = [];
+  try {
+    transactions = await offlineDB.transactions
+      .where('created_at')
+      .between(startDate.toISOString(), endDate.toISOString(), true, true)
+      .toArray();
+  } catch (error) {
+    console.warn('Could not fetch transactions:', error);
+  }
+
+  // Calculate VAT
+  const taxableTransactions = transactions.filter(t => t.payment_status === 'paid');
+  const totalOutputVAT = taxableTransactions.reduce((sum, t) => sum + t.tax, 0);
+  const totalRevenue = taxableTransactions.reduce((sum, t) => sum + t.subtotal, 0);
+
+  // Estimate input VAT (assume 40% of COGS)
+  const estimatedInputVAT = totalRevenue * 0.4 * 0.075;
+  const netVAT = Math.max(0, totalOutputVAT - estimatedInputVAT);
+
+  // Summary Box
+  doc.setDrawColor(0);
+  doc.setLineWidth(0.5);
+  doc.rect(15, yPos, pageWidth - 30, 40);
+
+  doc.setFont(undefined, 'bold');
+  doc.setFontSize(10);
+  yPos += 6;
+  doc.text('VAT LIABILITY SUMMARY', 18, yPos);
+  yPos += 8;
+
+  doc.setFont(undefined, 'normal');
+  doc.setFontSize(9);
+  doc.text(`Total Output VAT (Sales):`, 18, yPos);
+  doc.text(`₦${totalOutputVAT.toLocaleString('en-NG', { maximumFractionDigits: 2 })}`, pageWidth - 30, yPos, { align: 'right' });
+  yPos += 6;
+
+  doc.text(`Less: Input VAT (est. 40% COGS):`, 18, yPos);
+  doc.text(`₦${estimatedInputVAT.toLocaleString('en-NG', { maximumFractionDigits: 2 })}`, pageWidth - 30, yPos, { align: 'right' });
+  yPos += 8;
+
+  doc.setFont(undefined, 'bold');
+  doc.setFontSize(10);
+  doc.text(`NET VAT PAYABLE:`, 18, yPos);
+  doc.text(`₦${netVAT.toLocaleString('en-NG', { maximumFractionDigits: 2 })}`, pageWidth - 30, yPos, { align: 'right' });
+  yPos += 15;
+
+  // Transaction table
+  if (taxableTransactions.length > 0) {
+    autoTable(doc, {
+      startY: yPos,
+      head: [['Date', 'Description', 'Amount (₦)', 'VAT @ 7.5% (₦)']],
+      body: taxableTransactions.map(t => [
+        new Date(typeof t.created_at === 'string' ? t.created_at : new Date(t.created_at)).toLocaleDateString('en-NG'),
+        `Sale #${t.transaction_number?.slice(-6) || 'N/A'}`,
+        t.subtotal.toLocaleString('en-NG', { maximumFractionDigits: 2 }),
+        t.tax.toLocaleString('en-NG', { maximumFractionDigits: 2 })
+      ]),
+      margin: { left: 15, right: 15 },
+      styles: { fontSize: 8 },
+      headStyles: { fillColor: [41, 128, 185], textColor: [255, 255, 255] }
+    });
+  }
+
+  // Filing deadline
+  const deadlineDate = new Date(year, month, 21); // 21st of next month
+  yPos = (doc as any).lastAutoTable.finalY + 15;
+  doc.setDrawColor(255, 0, 0);
+  doc.setLineWidth(1);
+  doc.rect(15, yPos, pageWidth - 30, 15);
+  doc.setFont(undefined, 'bold');
+  doc.setFontSize(10);
+  doc.setTextColor(255, 0, 0);
+  doc.text(`FILING DEADLINE: ${deadlineDate.toLocaleDateString('en-NG')}`, pageWidth / 2, yPos + 7, { align: 'center', maxWidth: pageWidth - 40 });
+  doc.setTextColor(0, 0, 0);
+
+  // Footer
+  doc.setFontSize(8);
+  doc.setFont(undefined, 'italic');
+  doc.text(`Generated by ${businessName} POS — For accountant review only`, pageWidth / 2, pageHeight - 10, { align: 'center' });
+
+  return doc.output('blob');
+}
+
+/**
+ * Generate a professional CIT Estimation PDF (Annual)
+ */
+export async function generateCITEstimate(
+  year: number,
+  options?: Partial<PDFOptions>
+): Promise<Blob> {
+  const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+  const pageWidth = doc.internal.pageSize.getWidth();
+  let yPos = 15;
+
+  const businessName = options?.businessName || 'Your Business Name';
+  const businessAddress = options?.businessAddress || 'Business Address';
+
+  // Header
+  doc.setFontSize(14);
+  doc.setFont(undefined, 'bold');
+  doc.text('COMPANY INCOME TAX (CIT) ESTIMATION', pageWidth / 2, yPos, { align: 'center' });
+  yPos += 8;
+
+  doc.setFontSize(11);
+  doc.text(`Tax Year: ${year}`, pageWidth / 2, yPos, { align: 'center' });
+  yPos += 12;
+
+  doc.setFontSize(10);
+  doc.setFont(undefined, 'normal');
+  doc.text(`Business: ${businessName}`, 15, yPos);
+  yPos += 6;
+  doc.text(`Address: ${businessAddress}`, 15, yPos);
+  yPos += 12;
+
+  // Fetch transactions for the year
+  const startDate = new Date(year, 0, 1);
+  const endDate = new Date(year, 11, 31);
+
+  let transactions: Transaction[] = [];
+  try {
+    transactions = await offlineDB.transactions
+      .where('created_at')
+      .between(startDate.toISOString(), endDate.toISOString(), true, true)
+      .toArray();
+  } catch (error) {
+    console.warn('Could not fetch transactions:', error);
+  }
+
+  const grossRevenue = transactions
+    .filter(t => t.payment_status === 'paid')
+    .reduce((sum, t) => sum + t.subtotal, 0);
+
+  // Estimate COGS at 40% of revenue
+  const estimatedCOGS = grossRevenue * 0.4;
+
+  // Estimate deductions (rent, salaries, utilities, etc.)
+  const estimatedDeductions = grossRevenue * 0.15; // Conservative estimate
+
+  const assessableProfit = Math.max(0, grossRevenue - estimatedCOGS - estimatedDeductions);
+
+  // Determine CIT rate based on revenue band
+  let citRate = 0;
+  let band = '';
+  if (grossRevenue <= 25000000) {
+    citRate = 0;
+    band = 'Small Company (₦0–₦25M) — EXEMPT';
+  } else if (grossRevenue <= 100000000) {
+    citRate = 0.2;
+    band = 'Medium Company (₦25M–₦100M) — 20%';
+  } else {
+    citRate = 0.3;
+    band = 'Large Company (>₦100M) — 30%';
+  }
+
+  const estimatedCIT = assessableProfit * citRate;
+
+  // Computation Table
+  doc.setFont(undefined, 'bold');
+  doc.setFontSize(10);
+  doc.text('CIT COMPUTATION WORKSHEET', 15, yPos);
+  yPos += 10;
+
+  doc.setFont(undefined, 'normal');
+  doc.setFontSize(9);
+
+  const rows = [
+    ['Gross Revenue (Sales)', `₦${grossRevenue.toLocaleString('en-NG', { maximumFractionDigits: 2 })}`],
+    ['Less: Cost of Goods Sold (40% est.)', `₦${estimatedCOGS.toLocaleString('en-NG', { maximumFractionDigits: 2 })}`],
+    ['Gross Profit', `₦${(grossRevenue - estimatedCOGS).toLocaleString('en-NG', { maximumFractionDigits: 2 })}`],
+    ['Less: Allowable Deductions (s.24 CITA)', ''],
+    ['  • Salaries & Employee Benefits', `₦${(estimatedDeductions * 0.6).toLocaleString('en-NG', { maximumFractionDigits: 2 })}`],
+    ['  • Rent & Utilities', `₦${(estimatedDeductions * 0.2).toLocaleString('en-NG', { maximumFractionDigits: 2 })}`],
+    ['  • Professional Fees & Insurance', `₦${(estimatedDeductions * 0.2).toLocaleString('en-NG', { maximumFractionDigits: 2 })}`],
+    ['Total Deductions', `₦${estimatedDeductions.toLocaleString('en-NG', { maximumFractionDigits: 2 })}`],
+    ['ASSESSABLE PROFIT', `₦${assessableProfit.toLocaleString('en-NG', { maximumFractionDigits: 2 })}`]
+  ];
+
+  for (const row of rows) {
+    doc.text(row[0], 15, yPos);
+    if (row[1]) {
+      doc.text(row[1], pageWidth - 15, yPos, { align: 'right' });
+    }
+    yPos += 6;
+  }
+
+  yPos += 3;
+  doc.setFont(undefined, 'bold');
+  doc.setFontSize(10);
+  doc.text(`Tax Band: ${band}`, 15, yPos);
+  yPos += 8;
+
+  doc.text(`CIT Rate Applied: ${(citRate * 100).toFixed(0)}%`, 15, yPos);
+  yPos += 6;
+
+  // Final Calculation
+  doc.setDrawColor(0);
+  doc.setLineWidth(0.5);
+  doc.rect(15, yPos, pageWidth - 30, 20);
+  yPos += 6;
+
+  doc.setFont(undefined, 'bold');
+  doc.setFontSize(11);
+  doc.text(`ESTIMATED CIT PAYABLE:`, 18, yPos);
+  doc.text(`₦${estimatedCIT.toLocaleString('en-NG', { maximumFractionDigits: 2 })}`, pageWidth - 18, yPos, { align: 'right' });
+
+  // Notes
+  yPos += 20;
+  doc.setFont(undefined, 'bold');
+  doc.setFontSize(9);
+  doc.text('NOTES:', 15, yPos);
+  yPos += 6;
+
+  doc.setFont(undefined, 'normal');
+  doc.setFontSize(8);
+  doc.text('1. This is an estimate based on available transaction data.', 15, yPos);
+  yPos += 5;
+  doc.text('2. Actual deductions may vary based on supporting documentation.', 15, yPos);
+  yPos += 5;
+  doc.text('3. Capital Allowances (Initial 50%, Annual 25%) may reduce taxable profit further.', 15, yPos);
+  yPos += 5;
+  doc.text('4. VAT input tax credit reduces the effective CIT burden.', 15, yPos);
+
+  return doc.output('blob');
+}
+
+/**
+ * Generate an Annual Tax Summary PDF (Executive Overview)
+ */
+export async function generateAnnualTaxSummary(
+  year: number,
+  deductionReport?: DeductionReport,
+  options?: Partial<PDFOptions>
+): Promise<Blob> {
+  const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+  const pageWidth = doc.internal.pageSize.getWidth();
+  let yPos = 15;
+
+  const businessName = options?.businessName || 'Your Business Name';
+
+  // Header
+  doc.setFontSize(16);
+  doc.setFont(undefined, 'bold');
+  doc.text('ANNUAL TAX SUMMARY', pageWidth / 2, yPos, { align: 'center' });
+  yPos += 8;
+
+  doc.setFontSize(11);
+  doc.text(`${businessName} — Tax Year ${year}`, pageWidth / 2, yPos, { align: 'center' });
+  yPos += 15;
+
+  // Fetch transactions
+  const startDate = new Date(year, 0, 1);
+  const endDate = new Date(year, 11, 31);
+
+  let transactions: Transaction[] = [];
+  try {
+    transactions = await offlineDB.transactions
+      .where('created_at')
+      .between(startDate.toISOString(), endDate.toISOString(), true, true)
+      .toArray();
+  } catch (error) {
+    console.warn('Could not fetch transactions:', error);
+  }
+
+  const totalRevenue = transactions
+    .filter(t => t.payment_status === 'paid')
+    .reduce((sum, t) => sum + t.subtotal, 0);
+
+  const totalVATCollected = transactions
+    .filter(t => t.payment_status === 'paid')
+    .reduce((sum, t) => sum + t.tax, 0);
+
+  const estimatedCOGS = totalRevenue * 0.4;
+  const estimatedDeductions = totalRevenue * 0.15;
+  const assessableProfit = Math.max(0, totalRevenue - estimatedCOGS - estimatedDeductions);
+
+  let estimatedCIT = 0;
+  if (totalRevenue > 25000000 && totalRevenue <= 100000000) {
+    estimatedCIT = assessableProfit * 0.2;
+  } else if (totalRevenue > 100000000) {
+    estimatedCIT = assessableProfit * 0.3;
+  }
+
+  const totalTaxBurden = totalVATCollected + estimatedCIT;
+  const effectiveTaxRate = totalRevenue > 0 ? (totalTaxBurden / totalRevenue) * 100 : 0;
+
+  // Summary Cards
+  doc.setFont(undefined, 'bold');
+  doc.setFontSize(10);
+  doc.text('FINANCIAL OVERVIEW', 15, yPos);
+  yPos += 8;
+
+  doc.setFont(undefined, 'normal');
+  doc.setFontSize(9);
+
+  const metrics = [
+    { label: 'Total Revenue', value: `₦${totalRevenue.toLocaleString('en-NG', { maximumFractionDigits: 2 })}` },
+    { label: 'Total VAT Collected', value: `₦${totalVATCollected.toLocaleString('en-NG', { maximumFractionDigits: 2 })}` },
+    { label: 'Estimated CIT', value: `₦${estimatedCIT.toLocaleString('en-NG', { maximumFractionDigits: 2 })}` },
+    { label: 'Total Tax Burden', value: `₦${totalTaxBurden.toLocaleString('en-NG', { maximumFractionDigits: 2 })}` },
+    { label: 'Effective Tax Rate', value: `${effectiveTaxRate.toFixed(2)}%` }
+  ];
+
+  for (const metric of metrics) {
+    doc.text(`${metric.label}:`, 15, yPos);
+    doc.text(metric.value, pageWidth - 15, yPos, { align: 'right' });
+    yPos += 6;
+  }
+
+  // Tax Opportunities
+  yPos += 8;
+  doc.setFont(undefined, 'bold');
+  doc.setFontSize(10);
+  doc.text('TAX OPTIMIZATION OPPORTUNITIES', 15, yPos);
+  yPos += 8;
+
+  if (deductionReport && deductionReport.totalPotentialSavings > 0) {
+    doc.setFont(undefined, 'normal');
+    doc.setFontSize(9);
+    doc.text(`Potential Annual Savings: ₦${deductionReport.totalPotentialSavings.toLocaleString('en-NG', { maximumFractionDigits: 2 })}`, 15, yPos);
+    yPos += 6;
+
+    if (deductionReport.priorityActions.length > 0) {
+      doc.setFontSize(8);
+      for (let i = 0; i < Math.min(3, deductionReport.priorityActions.length); i++) {
+        const action = deductionReport.priorityActions[i];
+        doc.text(`${i + 1}. ${action.title} — ₦${action.estimatedSavingNaira.toLocaleString('en-NG', { maximumFractionDigits: 2 })}`, 20, yPos);
+        yPos += 5;
+      }
+    }
+  } else {
+    doc.setFont(undefined, 'normal');
+    doc.setFontSize(9);
+    doc.text('Run a tax scan in the Tax Advisor to identify optimization opportunities.', 15, yPos);
+  }
+
+  yPos += 10;
+  doc.setFont(undefined, 'italic');
+  doc.setFontSize(8);
+  doc.text('This summary was generated from POS transaction data as of the report date.', 15, yPos);
+  yPos += 5;
+  doc.text('Consult with a FIRS-registered tax consultant to finalize your tax filings.', 15, yPos);
+
+  return doc.output('blob');
+}

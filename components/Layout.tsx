@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
-import { ShoppingCart, Package, Settings as SettingsIcon, LogOut, FileBarChart, Wifi, WifiOff, History, Wallet, ShieldAlert, RefreshCw, CheckCircle, Clock } from 'lucide-react';
+import { ShoppingCart, Package, Settings as SettingsIcon, LogOut, FileBarChart, Wifi, WifiOff, History, Wallet, ShieldAlert, RefreshCw, CheckCircle, Clock, Calculator } from 'lucide-react';
 import { useAuthStore } from '../stores/useAuthStore';
 import { useNetworkStatus } from '../hooks/useNetworkStatus';
 import { RegisterModal } from './transactions/RegisterModal';
@@ -30,6 +30,7 @@ export const Layout: React.FC = () => {
   }
 
   if (hasPermission('manage_settings')) {
+    navItems.push({ to: '/tax-advisor', icon: Calculator, label: 'Tax Advisor' });
     navItems.push({ to: '/settings', icon: SettingsIcon, label: 'Settings' });
   }
 

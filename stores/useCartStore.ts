@@ -7,7 +7,7 @@ export const useCartStore = create<CartState>()(
     (set, get) => ({
       items: [],
       heldTransactions: [],
-      taxRate: 0.075, // Default 7.5%
+      taxRate: 0.075, // Default 7.5% (legacy, used as fallback)
 
       setTaxRate: (rate: number) => set({ taxRate: rate }),
 
@@ -50,7 +50,6 @@ export const useCartStore = create<CartState>()(
 
         if (quantity > item.stock_quantity) {
           // Cannot exceed stock
-          // Optionally we could return false here to indicate failure to UI
           return;
         }
 
@@ -63,8 +62,30 @@ export const useCartStore = create<CartState>()(
 
       clearCart: () => set({ items: [] }),
 
+      /**
+       * Calculate total with per-item tax classification
+       * Items with tax_class === 'VAT Exempt' are taxed at 0%
+       * All other items are taxed at 7.5%
+       * Returns subtotal (before tax)
+       */
       getTotal: () => {
         return get().items.reduce((total, item) => total + (item.price * item.quantity), 0);
+      },
+
+      /**
+       * Calculate tax amount with per-item tax classification [Phase 3]
+       * VAT-exempt items (tax_class === 'VAT Exempt') are not taxed
+       * Other items are taxed at 7.5%
+       */
+      getTax: () => {
+        const items = get().items;
+        return items.reduce((tax, item) => {
+          const itemSubtotal = item.price * item.quantity;
+          // Default to taxable unless explicitly exempt
+          const isTaxExempt = item.tax_class === 'VAT Exempt';
+          const taxRate = isTaxExempt ? 0 : 0.075;
+          return tax + (itemSubtotal * taxRate);
+        }, 0);
       },
 
       holdTransaction: (note) => {

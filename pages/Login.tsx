@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../stores/useAuthStore';
-import { Lock } from 'lucide-react';
+import { Lock, LogIn } from 'lucide-react';
 import { NumPad } from '../components/auth/NumPad';
 
 export const Login: React.FC = () => {
@@ -68,6 +68,17 @@ export const Login: React.FC = () => {
           
           <div className="mt-6 text-xs text-gray-400">
              <p>Default Admin PIN: 1234</p>
+          </div>
+
+          {/* Admin Login Link */}
+          <div className="mt-6 pt-6 border-t border-gray-200">
+            <button
+              onClick={() => navigate('/admin/login')}
+              className="w-full flex items-center justify-center gap-2 text-slate-700 hover:text-slate-900 text-sm font-medium transition"
+            >
+              <LogIn className="w-4 h-4" />
+              Platform Admin Access
+            </button>
           </div>
         </div>
       </div>

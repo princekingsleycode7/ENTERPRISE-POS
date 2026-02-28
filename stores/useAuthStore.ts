@@ -14,6 +14,7 @@ export const useAuthStore = create<AuthState>()(
   persist(
     (set, get) => ({
       user: null,
+      merchantId: null,
       isAuthenticated: false,
       lastActivity: Date.now(),
       
@@ -26,8 +27,10 @@ export const useAuthStore = create<AuthState>()(
               user: { 
                 id: result.employee.id!, 
                 name: result.employee.name, 
-                role: result.employee.role 
+                role: result.employee.role,
+                merchantId: result.employee.merchant_id
               },
+              merchantId: result.employee.merchant_id || null,
               isAuthenticated: true,
               lastActivity: Date.now()
             });
@@ -43,7 +46,7 @@ export const useAuthStore = create<AuthState>()(
 
       logout: () => {
          // Log logout before clearing state (handled in component usually, but good practice)
-         set({ user: null, isAuthenticated: false });
+         set({ user: null, merchantId: null, isAuthenticated: false });
       },
 
       updateActivity: () => set({ lastActivity: Date.now() }),
@@ -59,6 +62,7 @@ export const useAuthStore = create<AuthState>()(
       name: 'pos-auth-storage',
       partialize: (state) => ({ 
         user: state.user,
+        merchantId: state.merchantId,
         isAuthenticated: state.isAuthenticated,
         lastActivity: state.lastActivity
       }),
