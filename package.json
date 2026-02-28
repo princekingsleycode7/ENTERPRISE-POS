@@ -1,12 +1,23 @@
 {
-  "name": "modern-pos-system",
+  "name": "modern-pos-monorepo",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
   "type": "module",
+  "workspaces": [
+    "packages/shared-services",
+    "web",
+    "mobile"
+  ],
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
-    "preview": "vite preview"
+    "dev:web": "npm run dev --workspace=web",
+    "dev:mobile": "npm run dev --workspace=mobile",
+    "dev": "npm run dev:web",
+    "build:web": "npm run build --workspace=web",
+    "build:mobile": "npm run build --workspace=mobile",
+    "build:services": "npm run build --workspace=packages/shared-services",
+    "build": "npm run build:services && npm run build:web",
+    "install:all": "npm install",
+    "type-check": "npm run type-check --workspaces"
   },
   "dependencies": {
     "react-dom": "^19.2.4",
