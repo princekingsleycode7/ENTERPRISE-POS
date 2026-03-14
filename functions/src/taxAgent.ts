@@ -51,11 +51,54 @@ if (!process.env.GCLOUD_PROJECT) {
 }
 
 /**
+ * Main Cloud Function: getTaxSnapshot
+ * Fetches current tax performance metrics for the dashboard
+ */
+export const getTaxSnapshot = functions.https.onCall(
+  async (data: any, context: functions.https.CallableContext) => {
+    // Verify authentication
+    if (!context.auth) {
+      throw new functions.https.HttpsError('unauthenticated', 'Authentication required');
+    }
+
+    try {
+      const now = new Date();
+      const currentMonth = now.getMonth() + 1;
+      const currentYear = now.getFullYear();
+
+      // Use tools to get real data (mock implementation for now)
+      const vatData: any = await getTool('get_vat_collected', { month: currentMonth, year: currentYear });
+
+      // Calculate next deadline (15th of next month for VAT)
+      const nextMonth = currentMonth === 12 ? 1 : currentMonth + 1;
+      const nextYear = currentMonth === 12 ? currentYear + 1 : currentYear;
+      const deadlineDate = new Date(nextYear, nextMonth - 1, 15);
+
+      const diffTime = deadlineDate.getTime() - now.getTime();
+      const daysUntil = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+      return {
+        currentMonthVAT: vatData.vat_on_taxable || 0,
+        yearToDateCIT: 1250000, // Mock YTD CIT
+        nextFIRSDeadline: {
+          type: 'VAT',
+          date: deadlineDate.toISOString(),
+          daysUntil: daysUntil > 0 ? daysUntil : 0
+        }
+      };
+    } catch (error) {
+      console.error('Get Tax Snapshot Error:', error);
+      throw new functions.https.HttpsError('internal', 'Failed to fetch tax snapshot');
+    }
+  }
+);
+
+/**
  * Main Cloud Function: sendTaxMessage
  * Handles incoming tax advisor messages and returns Claude responses
  */
 export const sendTaxMessage = functions.https.onCall(
-  async (data: { userMessage: string; conversationHistory: Message[]; userId: string }, context) => {
+  async (data: { userMessage: string; conversationHistory: Message[]; userId: string }, context: functions.https.CallableContext) => {
     // Verify authentication
     if (!context.auth) {
       throw new functions.https.HttpsError('unauthenticated', 'Authentication required');
@@ -97,7 +140,7 @@ export const sendTaxMessage = functions.https.onCall(
       };
     } catch (error) {
       console.error('Tax Agent Error:', error);
-      
+
       if (error instanceof Error) {
         throw new functions.https.HttpsError(
           'internal',

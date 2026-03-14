@@ -12,6 +12,8 @@ import { TaxAdvisor } from './pages/TaxAdvisor';
 import { PendingActivation } from './pages/PendingActivation';
 import { AdminLogin } from './pages/admin/AdminLogin';
 import { AdminDashboard } from './pages/admin/AdminDashboard';
+import { DeviceSetup } from './pages/DeviceSetup';
+import { SignUp } from './pages/SignUp';
 import { useAuthStore } from './stores/useAuthStore';
 import { useAdminAuthStore } from './stores/useAdminAuthStore';
 import { syncService } from './services/offline/syncService';
@@ -55,6 +57,11 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
 
   if (!isAuthenticated) {
     return <Navigate to="/login" replace />;
+  }
+
+  // Device not bound
+  if (!localStorage.getItem('bound_merchant_id')) {
+    return <Navigate to="/device-setup" replace />;
   }
 
   if (isLoading) {
@@ -144,9 +151,17 @@ const App: React.FC = () => {
       <HashRouter>
         <Routes>
           {/* Merchant Routes */}
-          <Route path="/login" element={<Login />} />
+          <Route path="/device-setup" element={<DeviceSetup />} />
+          <Route path="/signup" element={<SignUp />} />
+          <Route path="/login" element={
+            localStorage.getItem('bound_merchant_id') ? (
+              <Login />
+            ) : (
+              <Navigate to="/device-setup" replace />
+            )
+          } />
           <Route path="/pending-activation" element={<PendingActivation />} />
-          
+
           {/* Admin Routes */}
           <Route path="/admin/login" element={<AdminLogin />} />
           <Route
@@ -157,7 +172,7 @@ const App: React.FC = () => {
               </AdminProtectedRoute>
             }
           />
-          
+
           {/* Protected Merchant Routes */}
           <Route
             path="/"

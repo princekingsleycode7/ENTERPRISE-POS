@@ -39,9 +39,11 @@ service cloud.firestore {
     // =========================================================================
 
     match /products/{productId} {
-      allow read: if true;
+      allow read: if request.auth != null && 
+        (request.auth.token.role == 'platform_admin' || resource.data.merchant_id == request.auth.uid);
 
-      allow create: if
+      allow create: if request.auth != null &&
+        (request.auth.token.role == 'platform_admin' || request.resource.data.merchant_id == request.auth.uid) &&
         hasRequiredFields(request.resource.data, ['name', 'price', 'sku', 'category']) &&
         isNonEmptyString(request.resource.data.name) &&
         isNonEmptyString(request.resource.data.sku) &&
@@ -49,12 +51,13 @@ service cloud.firestore {
         request.resource.data.price is number &&
         request.resource.data.price >= 0;
 
-      allow update: if
+      allow update: if request.auth != null &&
+        (request.auth.token.role == 'platform_admin' || resource.data.merchant_id == request.auth.uid) &&
         (!('name' in request.resource.data) || isNonEmptyString(request.resource.data.name)) &&
         (!('price' in request.resource.data) || (request.resource.data.price is number && request.resource.data.price >= 0));
 
-      // FIX: App supports deleting products
-      allow delete: if true;
+      allow delete: if request.auth != null &&
+        (request.auth.token.role == 'platform_admin' || resource.data.merchant_id == request.auth.uid);
     }
 
     // =========================================================================
@@ -62,16 +65,19 @@ service cloud.firestore {
     // =========================================================================
 
     match /employees/{employeeId} {
-      allow read: if true;
+      allow read: if request.auth != null && 
+        (request.auth.token.role == 'platform_admin' || resource.data.merchant_id == request.auth.uid);
 
-      allow create: if
+      allow create: if request.auth != null &&
+        (request.auth.token.role == 'platform_admin' || request.resource.data.merchant_id == request.auth.uid) &&
         hasRequiredFields(request.resource.data, ['name', 'role', 'active', 'pin_hash']) &&
         isNonEmptyString(request.resource.data.name) &&
         isValidRole(request.resource.data.role) &&
         request.resource.data.active is bool &&
         isNonEmptyString(request.resource.data.pin_hash);
 
-      allow update: if
+      allow update: if request.auth != null &&
+        (request.auth.token.role == 'platform_admin' || resource.data.merchant_id == request.auth.uid) &&
         (!('name' in request.resource.data) ||
           isNonEmptyString(request.resource.data.name)) &&
         (!('role' in request.resource.data) ||
@@ -93,9 +99,10 @@ service cloud.firestore {
     match /transactions/{transactionId} {
       allow read: if request.auth != null 
         && (request.auth.token.role == 'platform_admin' ||
-            (resource.data.merchant_id != null && resource.data.merchant_id == request.auth.token.merchantId));
+            (resource.data.merchant_id != null && resource.data.merchant_id == request.auth.uid));
 
       allow create: if request.auth != null
+        && (request.auth.token.role == 'platform_admin' || request.resource.data.merchant_id == request.auth.uid)
         && (!('platform_fee_status' in request.resource.data) || 
             request.resource.data.platform_fee_status == 'pending')
         && hasRequiredFields(request.resource.data, [
@@ -126,10 +133,11 @@ service cloud.firestore {
     // =========================================================================
 
     match /settings/{settingId} {
-      allow read: if true;
+      allow read: if request.auth != null && 
+        (request.auth.token.role == 'platform_admin' || settingId == request.auth.uid || settingId == 'global');
 
-      allow create: if
-        settingId == 'global' &&
+      allow create: if request.auth != null && 
+        (request.auth.token.role == 'platform_admin' || request.resource.data.merchant_id == request.auth.uid) &&
         hasRequiredFields(request.resource.data, [
           'store_name', 'currency', 'tax_rate', 'tax_enabled'
         ]) &&
@@ -138,8 +146,8 @@ service cloud.firestore {
         request.resource.data.tax_rate is number &&
         request.resource.data.tax_enabled is bool;
 
-      allow update: if
-        settingId == 'global' &&
+      allow update: if request.auth != null && 
+        (request.auth.token.role == 'platform_admin' || resource.data.merchant_id == request.auth.uid) &&
         (!('store_name' in request.resource.data) ||
           isNonEmptyString(request.resource.data.store_name)) &&
         (!('tax_rate' in request.resource.data) ||
@@ -153,9 +161,11 @@ service cloud.firestore {
     // =========================================================================
 
     match /audit_logs/{logId} {
-      allow read: if true;
+      allow read: if request.auth != null && 
+        (request.auth.token.role == 'platform_admin' || resource.data.merchant_id == request.auth.uid);
 
-      allow create: if
+      allow create: if request.auth != null &&
+        (request.auth.token.role == 'platform_admin' || request.resource.data.merchant_id == request.auth.uid) &&
         hasRequiredFields(request.resource.data, ['action', 'employee_id', 'timestamp']) &&
         isNonEmptyString(request.resource.data.action) &&
         isNonEmptyString(request.resource.data.employee_id);

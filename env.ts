@@ -6,7 +6,7 @@
 // For this environment, we are mocking the structure to show usage.
 
 export const ENV = {
-   FIREBASE: {
+  FIREBASE: {
     API_KEY: import.meta.env.VITE_FIREBASE_API_KEY as string,
     AUTH_DOMAIN: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN as string,
     PROJECT_ID: import.meta.env.VITE_FIREBASE_PROJECT_ID as string,
@@ -29,13 +29,13 @@ export const ENV = {
 
 
 
-  /**
-   * MONIEPOINT
-   * ──────────────────────────────────────────────────────────────────────────
-   * IMPORTANT: client_id and client_secret are NEVER stored here.
-   * They live exclusively in Firebase Functions config:
-   *   firebase functions:config:set moniepoint.client_id="..." moniepoint.client_secret="..."
-   *
-   * The frontend only needs to know the default terminal serial, which can
-   * also be overridden per-store in Firestore settings.
-   */
+/**
+ * MONIEPOINT
+ * ──────────────────────────────────────────────────────────────────────────
+ * IMPORTANT: client_id and client_secret are NEVER stored here.
+ * They live exclusively in Firebase Functions config:
+ *   firebase functions:config:set moniepoint.client_id="..." moniepoint.client_secret="..."
+ *
+ * The frontend only needs to know the default terminal serial, which can
+ * also be overridden per-store in Firestore settings.
+ */

@@ -43,7 +43,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.TOOL_DEFINITIONS = exports.SYSTEM_PROMPT = exports.sendTaxMessage = void 0;
+exports.TOOL_DEFINITIONS = exports.SYSTEM_PROMPT = exports.sendTaxMessage = exports.getTaxSnapshot = void 0;
 const functions = __importStar(require("firebase-functions"));
 const node_fetch_1 = __importDefault(require("node-fetch"));
 const taxSystemPrompt_1 = require("./taxSystemPrompt");
@@ -55,6 +55,42 @@ const ANTHROPIC_BASE_URL = 'https://api.anthropic.com/v1';
 if (!process.env.GCLOUD_PROJECT) {
     // Local dev or special setup
 }
+/**
+ * Main Cloud Function: getTaxSnapshot
+ * Fetches current tax performance metrics for the dashboard
+ */
+exports.getTaxSnapshot = functions.https.onCall(async (data, context) => {
+    // Verify authentication
+    if (!context.auth) {
+        throw new functions.https.HttpsError('unauthenticated', 'Authentication required');
+    }
+    try {
+        const now = new Date();
+        const currentMonth = now.getMonth() + 1;
+        const currentYear = now.getFullYear();
+        // Use tools to get real data (mock implementation for now)
+        const vatData = await (0, taxTools_1.getTool)('get_vat_collected', { month: currentMonth, year: currentYear });
+        // Calculate next deadline (15th of next month for VAT)
+        const nextMonth = currentMonth === 12 ? 1 : currentMonth + 1;
+        const nextYear = currentMonth === 12 ? currentYear + 1 : currentYear;
+        const deadlineDate = new Date(nextYear, nextMonth - 1, 15);
+        const diffTime = deadlineDate.getTime() - now.getTime();
+        const daysUntil = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+        return {
+            currentMonthVAT: vatData.vat_on_taxable || 0,
+            yearToDateCIT: 1250000, // Mock YTD CIT
+            nextFIRSDeadline: {
+                type: 'VAT',
+                date: deadlineDate.toISOString(),
+                daysUntil: daysUntil > 0 ? daysUntil : 0
+            }
+        };
+    }
+    catch (error) {
+        console.error('Get Tax Snapshot Error:', error);
+        throw new functions.https.HttpsError('internal', 'Failed to fetch tax snapshot');
+    }
+});
 /**
  * Main Cloud Function: sendTaxMessage
  * Handles incoming tax advisor messages and returns Claude responses

@@ -288,9 +288,7 @@ export const DeductionReport: React.FC<DeductionReportProps> = ({
         <p>
           Scan completed: {new Date(report.scanDate).toLocaleString()}
         </p>
-        <p>
-          💡 Consult with an FIRS-registered tax consultant before implementing changes.
-        </p>
+       
       </div>
     </div>
   );

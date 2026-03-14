@@ -1,4 +1,4 @@
-import { addDocument, updateDocument, deleteDocument, getDocuments } from '../firebase/firestore';
+import { addDocument, updateDocument, deleteDocument } from '../firebase/firestore';
 import { offlineDB } from '../offline/db';
 import { Product, AuditLog } from '../../types';
 import { logAuditAction } from '../firebase/audit';
@@ -17,8 +17,8 @@ export const inventoryService = {
       });
 
       // 2. Add to Dexie for immediate local UI update
-      await offlineDB.products.put({ ...product, id: newDoc.id });
-      
+      await offlineDB.products.put(newDoc as unknown as Product);
+
       return newDoc.id;
     } catch (error) {
       console.error('Error adding product:', error);
@@ -58,9 +58,9 @@ export const inventoryService = {
 
   // Adjust stock level
   async adjustStock(
-    productId: string, 
-    adjustment: number, 
-    reason: string, 
+    productId: string,
+    adjustment: number,
+    reason: string,
     employeeId: string,
     currentStock: number
   ) {
@@ -80,7 +80,7 @@ export const inventoryService = {
       };
 
       await logAuditAction('STOCK_ADJUSTMENT', `Product:${productId}`, auditDetails);
-      
+
       // Also save audit to local DB for redundancy
       await offlineDB.audit_logs.add({
         employee_id: employeeId,
@@ -124,7 +124,7 @@ export const inventoryService = {
     try {
       const productsRef = collection(db, 'products');
       const querySnapshot = await getDocs(productsRef);
-      
+
       return querySnapshot.docs.map(doc => ({
         ...doc.data(),
         firebaseId: doc.id,
@@ -162,11 +162,11 @@ export const inventoryService = {
 
       return querySnapshot.docs
         .map(doc => ({
-          ...doc.data(),
+          ...(doc.data() as Product),
           firebaseId: doc.id,
           id: doc.id
         }))
-        .filter(product => product.stock_quantity <= product.reorder_level) as Product[];
+        .filter(product => product.stock_quantity <= product.reorder_level);
     } catch (error) {
       console.error('Error getting low stock products:', error);
       return [];

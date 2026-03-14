@@ -1,13 +1,13 @@
-import { 
-  collection, 
-  doc, 
-  addDoc, 
-  setDoc, 
-  updateDoc, 
-  deleteDoc, 
-  getDoc, 
-  getDocs, 
-  query, 
+import {
+  collection,
+  doc,
+  addDoc,
+  setDoc,
+  updateDoc,
+  deleteDoc,
+  getDoc,
+  getDocs,
+  query,
   QueryConstraint,
   DocumentData,
   WithFieldValue,
@@ -15,12 +15,23 @@ import {
 } from 'firebase/firestore';
 import { db } from './config';
 
+// Helper to inject merchant ID
+const withMerchantId = (data: any) => {
+  const merchantId = localStorage.getItem('bound_merchant_id');
+  if (!merchantId) return data;
+  if (typeof data === 'object' && data !== null && !('merchant_id' in data)) {
+    return { ...data, merchant_id: merchantId };
+  }
+  return data;
+};
+
 // Generic helper to add a document
 export const addDocument = async (collectionName: string, data: WithFieldValue<DocumentData>) => {
   try {
+    const finalData = withMerchantId(data);
     const colRef = collection(db, collectionName);
-    const docRef = await addDoc(colRef, data);
-    return { id: docRef.id, ...(data as any) };
+    const docRef = await addDoc(colRef, finalData);
+    return { id: docRef.id, ...(finalData as any) };
   } catch (error) {
     console.error(`Error adding document to ${collectionName}:`, error);
     throw error;
@@ -35,6 +46,19 @@ export const updateDocument = async (collectionName: string, id: string, data: U
     return true;
   } catch (error) {
     console.error(`Error updating document ${id} in ${collectionName}:`, error);
+    throw error;
+  }
+};
+
+// Set document (Upsert)
+export const setDocument = async (collectionName: string, id: string, data: WithFieldValue<DocumentData>) => {
+  try {
+    const finalData = withMerchantId(data);
+    const docRef = doc(db, collectionName, id);
+    await setDoc(docRef, finalData, { merge: true });
+    return true;
+  } catch (error) {
+    console.error(`Error setting document ${id} in ${collectionName}:`, error);
     throw error;
   }
 };

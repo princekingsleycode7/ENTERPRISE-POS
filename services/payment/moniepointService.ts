@@ -168,7 +168,7 @@ export const moniepointService = {
       const functions = getFunctions(app);
       const getStatus = httpsCallable<
         { merchantReference: string },
-        { processingStatus: string; [key: string]: unknown }
+        { processingStatus: string;[key: string]: unknown }
       >(functions, 'getMoniepointTransactionStatus');
 
       const result = await getStatus({ merchantReference });

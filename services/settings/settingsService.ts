@@ -1,6 +1,6 @@
 import { offlineDB } from '../offline/db';
 import { Settings, Employee, Role } from '../../types';
-import { updateDocument, addDocument } from '../firebase/firestore';
+import { updateDocument, addDocument, setDocument, getDocument } from '../firebase/firestore';
 import { logAuditAction } from '../firebase/audit';
 import { pinAuth } from '../auth/pinAuth';
 import { ENV } from '../../config/env';
@@ -27,29 +27,31 @@ const DEFAULT_SETTINGS: Settings = {
 };
 
 export const settingsService = {
-  
+
   // --- Settings Management ---
 
   async getSettings(): Promise<Settings> {
-    let settings = await offlineDB.settings.get('global');
+    const settingId = localStorage.getItem('bound_merchant_id') || 'global';
+    let settings = await offlineDB.settings.get(settingId);
     if (!settings) {
       // Initialize defaults
-      settings = DEFAULT_SETTINGS;
+      settings = { ...DEFAULT_SETTINGS, id: settingId };
       await offlineDB.settings.put(settings);
     }
     return settings;
   },
 
   async updateSettings(updates: Partial<Settings>, adminId: string) {
+    const settingId = localStorage.getItem('bound_merchant_id') || 'global';
     const current = await this.getSettings();
-    const newData = { ...current, ...updates };
-    
+    const newData = { ...current, ...updates, id: settingId };
+
     // Update local DB
     await offlineDB.settings.put(newData);
 
     // Sync to Firebase (Store as a doc in 'settings' collection)
     if (navigator.onLine) {
-       await updateDocument('settings', 'global', newData);
+      await setDocument('settings', settingId, newData);
     }
 
     // Log Audit
@@ -62,6 +64,20 @@ export const settingsService = {
     return newData;
   },
 
+  async syncSettingsFromFirebase() {
+    try {
+      const settingId = localStorage.getItem('bound_merchant_id') || 'global';
+      const settings = await getDocument('settings', settingId);
+      if (settings) {
+        await offlineDB.settings.put(settings);
+        return settings;
+      }
+    } catch (error) {
+      console.error('Error syncing settings from Firebase:', error);
+    }
+    return null;
+  },
+
   // --- Employee Management ---
 
   async getAllEmployees(): Promise<Employee[]> {
@@ -71,19 +87,21 @@ export const settingsService = {
   async addEmployee(employee: Omit<Employee, 'id'>, adminId: string) {
     // 1. Save to Firebase
     let firebaseId: string;
+    let savedDoc: any;
     try {
-      const doc = await addDocument('employees', {
+      savedDoc = await addDocument('employees', {
         ...employee,
         created_at: new Date().toISOString()
       });
-      firebaseId = doc.id;
+      firebaseId = savedDoc.id;
     } catch (e) {
       // Offline fallback: generate a temp ID
       firebaseId = `local_${Date.now()}`;
+      savedDoc = { ...employee, id: firebaseId, merchant_id: localStorage.getItem('bound_merchant_id') || undefined };
     }
 
-    const newEmployee = { ...employee, id: firebaseId };
-    
+    const newEmployee = savedDoc as Employee;
+
     // 2. Save Local
     await offlineDB.employees.add(newEmployee);
 
@@ -115,7 +133,7 @@ export const settingsService = {
   async resetEmployeePin(id: string, newPin: string, adminId: string) {
     const pinHash = await pinAuth.hashPIN(newPin);
     await this.updateEmployee(id, { pin_hash: pinHash, is_locked: false, failed_attempts: 0 }, adminId);
-    
+
     await logAuditAction('RESET_PIN', `Employee:${id}`, {
       admin_id: adminId
     });

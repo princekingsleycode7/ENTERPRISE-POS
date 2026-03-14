@@ -1,8 +1,9 @@
 // services/offline/syncService.ts
-import { collection, getDocs, doc, setDoc } from 'firebase/firestore'; // Changed imports
+import { collection, getDocs, doc, setDoc, query, where } from 'firebase/firestore'; // Changed imports
 import { db as firestore } from '../firebase/config';
 import { offlineDB } from './db';
 import { Product, Transaction, Employee } from '../../types';
+import { settingsService } from '../settings/settingsService';
 import { pinAuth } from '../auth/pinAuth';
 import { ENV } from '../../config/env';
 import { useSyncStore } from '../../stores/useSyncStore';
@@ -36,23 +37,27 @@ function cleanUndefinedValues(obj: any): any {
 
 export const syncService = {
   async syncProductsFromFirebase() {
-    if (IS_MOCK_ENV) { 
+    if (IS_MOCK_ENV) {
       console.log('Mock environment: Skipping product sync from Firebase');
-      return; 
+      return;
     }
     try {
+      const merchantId = localStorage.getItem('bound_merchant_id');
+      if (!merchantId) return;
+
       useSyncStore.getState().setSyncing(true);
-      const snapshot = await getDocs(collection(firestore, 'products'));
+      const q = query(collection(firestore, 'products'), where('merchant_id', '==', merchantId));
+      const snapshot = await getDocs(q);
       const products: Product[] = snapshot.docs.map(doc => ({ id: doc.id, ...(doc.data() as any) } as Product));
-      
+
       // Always clear and reload from Firebase (no fallback to seed data)
       await offlineDB.products.clear();
-      
+
       if (products.length > 0) {
         await offlineDB.products.bulkPut(products);
       }
       // If no products in Firebase, database remains empty - user must add via admin UI
-      
+
       await offlineDB.cached_data.put({ id: 'last_product_sync', timestamp: Date.now() });
       useSyncStore.getState().setLastSyncTime(Date.now());
     } catch (error) {
@@ -60,15 +65,19 @@ export const syncService = {
       // Don't fallback to seed data - let user know data needs to be added via admin
       console.warn('No products available. Please add products via the admin UI.');
     } finally {
-       useSyncStore.getState().setSyncing(false);
+      useSyncStore.getState().setSyncing(false);
     }
   },
 
   async syncEmployeesFromFirebase() {
     if (IS_MOCK_ENV) { await this.seedDefaultAdmin(); return; }
     try {
+      const merchantId = localStorage.getItem('bound_merchant_id');
+      if (!merchantId) return;
+
       useSyncStore.getState().setSyncing(true);
-      const snapshot = await getDocs(collection(firestore, 'employees'));
+      const q = query(collection(firestore, 'employees'), where('merchant_id', '==', merchantId));
+      const snapshot = await getDocs(q);
       const employees: Employee[] = snapshot.docs.map(doc => ({ id: doc.id, ...(doc.data() as any) } as Employee));
       if (employees.length > 0) {
         await offlineDB.employees.bulkPut(employees);
@@ -96,10 +105,12 @@ export const syncService = {
   },
 
   async saveTransaction(transaction: Transaction) {
+    const merchantId = localStorage.getItem('bound_merchant_id');
     const id = await offlineDB.transactions.add({
       ...transaction,
+      merchant_id: merchantId || undefined,
       synced: false,
-      created_at: toISOString(transaction.created_at) 
+      created_at: toISOString(transaction.created_at)
     });
 
     const pendingCount = await offlineDB.transactions.filter(t => !t.synced).count();
@@ -116,14 +127,14 @@ export const syncService = {
 
     const pending = await offlineDB.transactions.filter(t => !t.synced).toArray();
     useSyncStore.getState().setPendingCount(pending.length);
-    
+
     if (pending.length === 0) return;
 
     useSyncStore.getState().setSyncing(true);
 
     for (const transaction of pending) {
       try {
-        const { id, ...data } = transaction; 
+        const { id, ...data } = transaction;
 
         // Removed logic that overwrites `created_at`, effectively triggering an exception with Firebase rules
         const firestoreData = cleanUndefinedValues({
@@ -134,12 +145,12 @@ export const syncService = {
         // FIX: Always use the strict unique transaction number as ID so offline updates override effectively
         await setDoc(doc(firestore, 'transactions', transaction.transaction_number), firestoreData, { merge: true });
         await offlineDB.transactions.update(id as number, { synced: true });
-        
+
       } catch (error) {
         console.error(`Failed to sync transaction ${transaction.transaction_number}`, error);
       }
     }
-    
+
     const remaining = await offlineDB.transactions.filter(t => !t.synced).count();
     useSyncStore.getState().setPendingCount(remaining);
     useSyncStore.getState().setSyncing(false);
@@ -155,6 +166,7 @@ export const syncService = {
     if (navigator.onLine && !IS_MOCK_ENV) {
       this.syncProductsFromFirebase();
       this.syncEmployeesFromFirebase();
+      settingsService.syncSettingsFromFirebase();
       this.syncPendingTransactions();
     }
 
@@ -170,6 +182,7 @@ export const syncService = {
         this.syncPendingTransactions();
         this.syncProductsFromFirebase();
         this.syncEmployeesFromFirebase();
+        settingsService.syncSettingsFromFirebase();
       }
     });
   }

@@ -77,46 +77,84 @@ async function getAccessToken() {
     return data.accessToken;
 }
 exports.pushMoniepointPayment = functions.https.onCall(async (data, context) => {
-    if (!context.auth)
-        throw new functions.https.HttpsError('unauthenticated', 'Must be authenticated');
-    const { terminalSerial, amount, merchantReference, paymentMethod } = data;
-    if (!terminalSerial || !amount || !merchantReference)
-        throw new functions.https.HttpsError('invalid-argument', 'Missing required fields');
-    if (amount <= 0)
-        throw new functions.https.HttpsError('invalid-argument', 'Amount must be positive');
-    const token = await getAccessToken();
-    const response = await (0, node_fetch_1.default)(`${MONIEPOINT_BASE_URL}/v1/transactions`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ terminalSerial, amount, merchantReference, transactionType: 'PURCHASE', paymentMethod: paymentMethod ?? 'ANY' })
-    });
-    if (response.status === 202) {
-        await db.collection(WEBHOOK_RESULTS_COLLECTION).doc(merchantReference).set({
-            merchantReference,
-            terminalSerial,
-            amount,
-            paymentMethod,
-            transactionStatus: 'PENDING',
-            initiatedBy: context.auth.uid,
-            initiatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    try {
+        if (!context.auth) {
+            throw new functions.https.HttpsError('unauthenticated', 'Must be authenticated');
+        }
+        const { terminalSerial, amount, merchantReference, paymentMethod } = data;
+        if (!terminalSerial || !amount || !merchantReference) {
+            throw new functions.https.HttpsError('invalid-argument', 'Missing required fields');
+        }
+        if (amount <= 0) {
+            throw new functions.https.HttpsError('invalid-argument', 'Amount must be positive');
+        }
+        functions.logger.info('[Moniepoint] Pushing payment', { terminalSerial, amount, merchantReference });
+        const token = await getAccessToken();
+        const response = await (0, node_fetch_1.default)(`${MONIEPOINT_BASE_URL}/v1/transactions`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify({
+                terminalSerial,
+                amount,
+                merchantReference,
+                transactionType: 'PURCHASE',
+                paymentMethod: paymentMethod ?? 'ANY'
+            })
         });
-        return { success: true };
+        if (response.status === 202) {
+            await db.collection(WEBHOOK_RESULTS_COLLECTION).doc(merchantReference).set({
+                merchantReference,
+                terminalSerial,
+                amount,
+                paymentMethod,
+                transactionStatus: 'PENDING',
+                initiatedBy: context.auth.uid,
+                initiatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            });
+            return { success: true };
+        }
+        const errorBody = await response.json().catch(() => ({}));
+        functions.logger.error('[Moniepoint] Push failed', { status: response.status, errorBody });
+        return {
+            success: false,
+            error: errorBody.message || errorBody.error || 'Failed to push payment to terminal'
+        };
     }
-    const errorBody = await response.json().catch(() => ({}));
-    functions.logger.error('[Moniepoint] Push failed', errorBody);
-    return { success: false, error: errorBody.message ?? 'Failed to push payment to terminal' };
+    catch (error) {
+        functions.logger.error('[Moniepoint] Unexpected error in pushMoniepointPayment', error);
+        if (error instanceof functions.https.HttpsError)
+            throw error;
+        throw new functions.https.HttpsError('internal', error.message || 'An unexpected error occurred');
+    }
 });
 exports.getMoniepointTransactionStatus = functions.https.onCall(async (data, context) => {
-    if (!context.auth)
-        throw new functions.https.HttpsError('unauthenticated', 'Must be authenticated');
-    const { merchantReference } = data;
-    if (!merchantReference)
-        throw new functions.https.HttpsError('invalid-argument', 'merchantReference required');
-    const token = await getAccessToken();
-    const response = await (0, node_fetch_1.default)(`${MONIEPOINT_BASE_URL}/v1/transactions/merchants/${encodeURIComponent(merchantReference)}`, { method: 'GET', headers: { Authorization: `Bearer ${token}` } });
-    if (!response.ok)
-        throw new functions.https.HttpsError('internal', 'Failed to query transaction status');
-    return response.json();
+    try {
+        if (!context.auth)
+            throw new functions.https.HttpsError('unauthenticated', 'Must be authenticated');
+        const { merchantReference } = data;
+        if (!merchantReference)
+            throw new functions.https.HttpsError('invalid-argument', 'merchantReference required');
+        const token = await getAccessToken();
+        const response = await (0, node_fetch_1.default)(`${MONIEPOINT_BASE_URL}/v1/transactions/merchants/${encodeURIComponent(merchantReference)}`, {
+            method: 'GET',
+            headers: { Authorization: `Bearer ${token}` }
+        });
+        if (!response.ok) {
+            const errorBody = await response.text();
+            functions.logger.error('[Moniepoint] Status query failed', { status: response.status, errorBody });
+            throw new functions.https.HttpsError('internal', `Failed to query transaction status: ${errorBody}`);
+        }
+        return response.json();
+    }
+    catch (error) {
+        functions.logger.error('[Moniepoint] Unexpected error in getMoniepointTransactionStatus', error);
+        if (error instanceof functions.https.HttpsError)
+            throw error;
+        throw new functions.https.HttpsError('internal', error.message || 'An unexpected error occurred');
+    }
 });
 exports.moniepointWebhook = functions.https.onRequest(async (req, res) => {
     if (req.method !== 'POST') {
